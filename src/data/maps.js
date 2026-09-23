@@ -1,5 +1,6 @@
 // 地图用种子随机数确定性生成 —— 所有客户端看到的世界完全一致。
-// 图块：. 草地  , 高草丛(遇敌)  = 土路  p 石板  ~ 水  s 沙  T 树  f 花  # 栅栏  r 岩石  S 告示牌  B 栈桥
+// 户外图块：. 草地  , 高草丛(遇敌)  = 土路  p 石板  ~ 水  s 沙  T 树  f 花  # 栅栏  r 岩石  S 告示牌  B 栈桥
+// 室内图块：w 木地板  k 瓷砖地板  R 地毯  x 出口地垫（传送）  W 墙  C 柜台  b 床  t 桌子  c 椅子/长凳  h 书架  D 货架  P 盆栽  M 治疗机  v 电视
 import { mulberry32 } from '../util.js'
 
 const grid = (w, h, ch) => Array.from({ length: h }, () => Array(w).fill(ch))
@@ -45,11 +46,11 @@ function town() {
       '21,22': '对战广场：点击其他训练家即可发起实时对战！',
     },
     buildings: [
-      { x: 5, y: 6, w: 5, h: 4, kind: 'house', roof: '#d64545', label: '你的家', door: [7, 9], action: 'home' },
-      { x: 26, y: 6, w: 5, h: 4, kind: 'house', roof: '#3f8f5a', label: '小光家', door: [28, 9], action: 'talk',
+      { x: 5, y: 6, w: 5, h: 4, kind: 'house', roof: '#d64545', label: '你的家', door: [7, 9], action: 'home', interior: 'town_home' },
+      { x: 26, y: 6, w: 5, h: 4, kind: 'house', roof: '#3f8f5a', label: '小光家', door: [28, 9], action: 'talk', interior: 'town_house2',
         lines: ['小光出门冒险去了，留下了一张字条：', '“听说幽影森林的祭坛附近，有人见过会发光的蝴蝶！”'] },
-      { x: 4, y: 15, w: 6, h: 4, kind: 'center', roof: '#ef476f', label: '精灵驿站', door: [7, 18], action: 'heal' },
-      { x: 26, y: 15, w: 5, h: 4, kind: 'shop', roof: '#3a86ff', label: '友好商店', door: [28, 18], action: 'shop' },
+      { x: 4, y: 15, w: 6, h: 4, kind: 'center', roof: '#ef476f', label: '精灵驿站', door: [7, 18], action: 'heal', interior: 'town_center' },
+      { x: 26, y: 15, w: 5, h: 4, kind: 'shop', roof: '#3a86ff', label: '友好商店', door: [28, 18], action: 'shop', interior: 'town_shop' },
     ],
     npcs: [
       { id: 'prof', x: 20, y: 10, dir: 'down', name: '白博士', look: L(0, 4, 7, 0, 0),
@@ -133,12 +134,12 @@ function village() {
     id: 'village', name: '晨风村', g, bg: '#2f6f38', battleBg: 'lake', spawn: true,
     signs: { '15,12': '晨风村 —— 湖畔的宁静小村。精灵驿站就在东边。' },
     buildings: [
-      { x: 20, y: 9, w: 6, h: 4, kind: 'center', roof: '#ef476f', label: '精灵驿站', door: [23, 12], action: 'heal' },
-      { x: 27, y: 9, w: 5, h: 4, kind: 'house', roof: '#8a5a44', label: '村长家', door: [29, 12], action: 'talk',
+      { x: 20, y: 9, w: 6, h: 4, kind: 'center', roof: '#ef476f', label: '精灵驿站', door: [23, 12], action: 'heal', interior: 'village_center' },
+      { x: 27, y: 9, w: 5, h: 4, kind: 'house', roof: '#8a5a44', label: '村长家', door: [29, 12], action: 'talk', interior: 'village_elder',
         lines: ['村长：年轻人，这个世界没有中心服务器。', '村长：大家的位置和聊天通过 Yjs 实时同步，存档则写在 Nostr 上——谁也删不掉你的冒险记录。'] },
-      { x: 4, y: 17, w: 5, h: 4, kind: 'house', roof: '#c77dff', label: '民居', door: [6, 20], action: 'talk',
+      { x: 4, y: 17, w: 5, h: 4, kind: 'house', roof: '#c77dff', label: '民居', door: [6, 20], action: 'talk', interior: 'village_house',
         lines: ['屋里传来了烤面包的香味……', '“出门在外，记得常回精灵驿站休息！”'] },
-      { x: 24, y: 17, w: 5, h: 4, kind: 'shop', roof: '#3a86ff', label: '湖畔商店', door: [26, 20], action: 'shop' },
+      { x: 24, y: 17, w: 5, h: 4, kind: 'shop', roof: '#3a86ff', label: '湖畔商店', door: [26, 20], action: 'shop', interior: 'village_shop' },
     ],
     npcs: [
       { id: 'fisher', x: 10, y: 9, dir: 'up', name: '钓鱼大叔', look: L(2, 4, 4, 2, 2, 3),
@@ -183,12 +184,116 @@ function forest() {
   }
 }
 
+
+// —— 室内 ——
+// 房间：上方两行墙、左右墙，底边中央是出口地垫 x（踩上去回到门外）。玩家从地垫上方一格进入、面朝上。
+function room(w, h, floor) {
+  const g = grid(w, h, floor)
+  rect(g, 0, 0, w, 2, 'W'); rect(g, 0, 0, 1, h, 'W'); rect(g, w - 1, 0, 1, h, 'W')
+  const mx = Math.floor(w / 2)
+  set(g, mx, h - 1, 'x')
+  return { g, mx }
+}
+function interior(id, name, outside, door, { w, h, floor, build, npcs = [], signs = {} }) {
+  const { g, mx } = room(w, h, floor)
+  build(g)
+  return {
+    id, name, g, bg: '#15131f', battleBg: 'meadow', interior: true, floor,
+    entry: { x: mx, y: h - 2 },
+    signs, buildings: [], npcs,
+    warps: [{ x: mx, y: h - 1, w: 1, h: 1, to: outside, tx: door[0], ty: door[1] + 1, dir: 'down' }],
+    wild: null,
+  }
+}
+
+function centerRoom(id, name, outside, door, nurseId) {
+  return interior(id, name, outside, door, {
+    w: 13, h: 9, floor: 'k',
+    build: (g) => {
+      rect(g, 3, 3, 7, 1, 'C')
+      set(g, 4, 2, 'M'); set(g, 8, 2, 'M')
+      set(g, 1, 2, 'P'); set(g, 11, 2, 'P'); set(g, 1, 7, 'P'); set(g, 11, 7, 'P')
+      rect(g, 1, 5, 2, 1, 'c'); rect(g, 10, 5, 2, 1, 'c')
+      rect(g, 5, 5, 3, 3, 'R')
+    },
+    npcs: [{ id: nurseId, x: 6, y: 2, dir: 'down', name: '驿站护士', look: L(0, 6, 7, 1, 2, 0), action: 'heal',
+      lines: ['欢迎来到精灵驿站！', '我来帮你的精灵们恢复体力……', '♪ ♪ ♪', '你的精灵都恢复健康了！欢迎再来！'] }],
+    signs: {},
+  })
+}
+
+function shopRoom(id, name, outside, door, clerkId) {
+  return interior(id, name, outside, door, {
+    w: 11, h: 8, floor: 'k',
+    build: (g) => {
+      rect(g, 1, 3, 3, 1, 'C')
+      rect(g, 6, 2, 4, 1, 'D'); rect(g, 6, 4, 4, 1, 'D')
+      set(g, 1, 6, 'P'); set(g, 9, 6, 'P')
+      rect(g, 4, 5, 3, 2, 'R')
+    },
+    npcs: [{ id: clerkId, x: 2, y: 2, dir: 'down', name: '店员', look: L(1, 0, 1, 3, 1, 1), action: 'shop',
+      lines: ['欢迎光临！需要点什么？'] }],
+  })
+}
+
+const INTERIORS = [
+  interior('town_home', '你的家', 'town', [7, 9], {
+    w: 11, h: 9, floor: 'w',
+    build: (g) => {
+      set(g, 2, 2, 'v'); rect(g, 3, 2, 2, 1, 'h')
+      rect(g, 8, 2, 1, 2, 'b')
+      rect(g, 4, 4, 2, 1, 't'); set(g, 3, 4, 'c'); set(g, 6, 4, 'c')
+      rect(g, 3, 6, 5, 2, 'R')
+      set(g, 1, 2, 'P'); set(g, 9, 7, 'P')
+    },
+    npcs: [{ id: 'mom', x: 7, y: 5, dir: 'left', name: '妈妈', look: L(0, 1, 6, 2), action: 'home',
+      lines: ['回来啦？先好好休息一下吧。', '（队伍全部恢复了健康）'] }],
+  }),
+  interior('town_house2', '小光家', 'town', [28, 9], {
+    w: 9, h: 8, floor: 'w',
+    build: (g) => {
+      rect(g, 1, 2, 3, 1, 'h')
+      rect(g, 7, 2, 1, 2, 'b')
+      set(g, 4, 4, 't'); set(g, 5, 4, 'c')
+      rect(g, 2, 5, 4, 2, 'R')
+      set(g, 1, 6, 'P')
+    },
+    signs: { '4,4': '桌上有一张字条：“听说幽影森林的祭坛附近，有人见过会发光的蝴蝶！——小光”' },
+  }),
+  centerRoom('town_center', '新叶镇·精灵驿站', 'town', [7, 18], 'nurse_town'),
+  shopRoom('town_shop', '友好商店', 'town', [28, 18], 'clerk_town'),
+  centerRoom('village_center', '晨风村·精灵驿站', 'village', [23, 12], 'nurse_village'),
+  interior('village_elder', '村长家', 'village', [29, 12], {
+    w: 10, h: 8, floor: 'w',
+    build: (g) => {
+      rect(g, 1, 2, 4, 1, 'h'); rect(g, 6, 2, 2, 1, 'h')
+      rect(g, 3, 4, 3, 1, 't')
+      rect(g, 3, 5, 4, 2, 'R')
+      set(g, 8, 2, 'P'); set(g, 1, 6, 'P')
+    },
+    npcs: [{ id: 'elder', x: 7, y: 4, dir: 'left', name: '村长 老松', look: L(1, 4, 5, 2, 0),
+      lines: ['年轻人，这个世界没有中心服务器。', '大家的位置和聊天通过 Yjs 实时同步，存档则签名写在 Nostr 上——谁也删不掉你的冒险记录。'] }],
+  }),
+  interior('village_house', '民居', 'village', [6, 20], {
+    w: 9, h: 8, floor: 'w',
+    build: (g) => {
+      rect(g, 1, 2, 2, 1, 'h'); set(g, 3, 2, 'v')
+      rect(g, 7, 2, 1, 2, 'b')
+      set(g, 3, 4, 't'); set(g, 4, 4, 't')
+      rect(g, 2, 5, 5, 2, 'R')
+    },
+    npcs: [{ id: 'baker', x: 6, y: 4, dir: 'down', name: '面包奶奶', look: L(0, 4, 3, 4, 2, 3),
+      lines: ['刚烤好的面包，要不要尝一块？', '出门在外，记得常回精灵驿站休息哦。'] }],
+  }),
+  shopRoom('village_shop', '湖畔商店', 'village', [26, 20], 'clerk_village'),
+]
+
 // 多人共享的稀有精灵：[物种, 权重, 最低等级, 最高等级]
 export const RARE_SPAWNS = [
   ['zappy', 30, 9, 13], ['frostcat', 24, 10, 14], ['lunamoth', 20, 12, 16], ['wispy', 16, 11, 15], ['thundrake', 6, 17, 21],
 ]
 
-const SOLID = new Set(['T', '~', '#', 'r', 'S'])
+const SOLID = new Set(['T', '~', '#', 'r', 'S', 'W', 'C', 'b', 't', 'c', 'h', 'D', 'P', 'M', 'v'])
 
 function finalize(m) {
   m.h = m.g.length
@@ -205,5 +310,5 @@ function finalize(m) {
   return m
 }
 
-export const MAPS = Object.fromEntries([town(), route1(), village(), forest()].map((m) => [m.id, finalize(m)]))
-export const tileAt = (m, x, y) => (x < 0 || y < 0 || x >= m.w || y >= m.h ? 'T' : m.tiles[y][x])
+export const MAPS = Object.fromEntries([town(), route1(), village(), forest(), ...INTERIORS].map((m) => [m.id, finalize(m)]))
+export const tileAt = (m, x, y) => (x < 0 || y < 0 || x >= m.w || y >= m.h ? (m.interior ? 'W' : 'T') : m.tiles[y][x])

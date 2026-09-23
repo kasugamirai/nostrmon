@@ -1,0 +1,77 @@
+/* —— 3D 战斗画面 —— */
+#b-3d { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+#b-scene > .b-info { z-index: 3; }
+#b-fx { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+#b-top { z-index: 4; }
+
+/* 伤害数字（位置由舞台投影目标得到） */
+.b3d-dmg {
+  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-family: var(--display); line-height: 1; color: #fff; white-space: nowrap; pointer-events: none;
+  animation: b3dDmg 1.15s cubic-bezier(0.2, 0.8, 0.3, 1) both; will-change: transform, opacity;
+}
+.b3d-dmg b {
+  font-weight: normal; font-size: 34px; letter-spacing: 0.02em;
+  -webkit-text-stroke: 6px var(--ink); paint-order: stroke fill; filter: drop-shadow(0 3px 0 var(--ink));
+}
+.b3d-dmg small {
+  font: 900 12px var(--body); color: var(--gold); background: var(--ink); border-radius: 999px; padding: 2px 9px;
+  letter-spacing: 0.08em;
+}
+.b3d-dmg.crit b { font-size: 46px; color: var(--gold); }
+.b3d-dmg.super b { font-size: 42px; color: #ff8a4c; }
+.b3d-dmg.super small { color: #fff; background: var(--coral); box-shadow: 0 0 0 2px var(--ink); }
+.b3d-dmg.crit.super b { color: var(--gold); }
+.b3d-dmg.weak b { font-size: 24px; color: #c9ccd6; -webkit-text-stroke-width: 4px; }
+@keyframes b3dDmg {
+  0% { opacity: 0; transform: translate(-50%, -60%) scale(0.4); }
+  14% { opacity: 1; transform: translate(-50%, -112%) scale(1.25); }
+  28% { transform: translate(-50%, -118%) scale(1); }
+  72% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -200%) scale(0.95); }
+}
+
+.b3d-tag {
+  position: absolute; left: 0; top: 0; font: 700 14px var(--body); color: var(--ink); background: rgba(245, 247, 251, 0.92);
+  border: 2px solid var(--ink); border-radius: 999px; padding: 2px 10px; white-space: nowrap; pointer-events: none;
+  animation: b3dTag 1.1s ease-out both;
+}
+.b3d-tag.miss { color: #6b7080; }
+@keyframes b3dTag {
+  0% { opacity: 0; transform: translate(-50%, -80%); }
+  15% { opacity: 1; transform: translate(-50%, -120%); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -170%); }
+}
+
+/* 全屏闪光（雷电、会心、捕捉） */
+.b3d-flash { position: absolute; inset: 0; opacity: 0; animation: b3dFlash 200ms ease-out both; }
+@keyframes b3dFlash { 0% { opacity: var(--a, 0.5); } 100% { opacity: 0; } }
+
+/* 进入战斗的斜切转场 */
+.b3d-wipe { position: absolute; inset: 0; z-index: 9; }
+.b3d-wipe i { position: absolute; left: -10%; width: 120%; height: 56%; background: var(--ink); animation: b3dWipeT 0.8s cubic-bezier(0.7, 0, 0.3, 1) both; }
+.b3d-wipe i:first-child { top: 0; clip-path: polygon(0 0, 100% 0, 100% 72%, 0 100%); }
+.b3d-wipe i:last-child { bottom: 0; clip-path: polygon(0 28%, 100% 0, 100% 100%, 0 100%); animation-name: b3dWipeB; }
+.b3d-wipe i:first-child::after { content: ''; position: absolute; left: 0; right: 0; bottom: 12%; height: 4px; background: var(--gold); transform: rotate(-2.4deg); box-shadow: 0 0 18px var(--gold); }
+@keyframes b3dWipeT { 0%, 22% { transform: translateY(0); } 100% { transform: translateY(-112%); } }
+@keyframes b3dWipeB { 0%, 22% { transform: translateY(0); } 100% { transform: translateY(112%); } }
+
+/* WebGL 不可用时：摆放基类的像素精灵画布 */
+#b-scene.b3d-fallback #b-foe { position: absolute; right: 10%; top: 18%; width: min(192px, 30vw); height: min(192px, 30vw); z-index: 1; }
+#b-scene.b3d-fallback #b-me { position: absolute; left: 6%; bottom: 3%; width: min(240px, 38vw); height: min(240px, 38vw); z-index: 1; }
+
+@media (max-width: 720px) {
+  .b3d-dmg b { font-size: 28px; -webkit-text-stroke-width: 5px; }
+  .b3d-dmg.crit b { font-size: 38px; }
+  .b3d-dmg.super b { font-size: 35px; }
+  .b3d-dmg.weak b { font-size: 21px; }
+  .b3d-dmg small { font-size: 11px; padding: 1px 7px; }
+}
+
+/* 减少动态效果：保留数字但只做淡出，去掉转场 */
+@media (prefers-reduced-motion: reduce) {
+  #b-fx .b3d-dmg, #b-fx .b3d-tag { animation: b3dStill 1.1s linear both !important; transform: translate(-50%, -110%); }
+  #b-fx .b3d-wipe { display: none; }
+}
+@keyframes b3dStill { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }

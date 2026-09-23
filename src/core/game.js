@@ -265,6 +265,7 @@ game.onArrive = (x, y, tile) => {
 game.talkNpc = async (npc) => {
   const p = game.world.p
   npc.dir = { up: 'down', down: 'up', left: 'right', right: 'left' }[p.dir] || npc.dir
+  if (npc.action) return npcService(npc)
   if (npc.trainer && !game.save.beaten[npc.id]) {
     if (!game.save.party.some((m) => m.hp > 0)) { await say(['你的精灵都没有体力了，先去精灵驿站休息一下吧。'], npc.name); return }
     await say(npc.lines, npc.name)
@@ -273,8 +274,29 @@ game.talkNpc = async (npc) => {
   await say(npc.trainer ? npc.after : npc.lines, npc.name)
 }
 
+async function npcService(npc) {
+  const s = game.save
+  if (npc.action === 'heal' || npc.action === 'home') {
+    s.party.forEach(healMon)
+    if (npc.action === 'heal') s.respawn = { map: game.world.map.id, x: npc.x, y: npc.y + 2 }
+    updateHud()
+    game.saveSoon()
+    await say(npc.lines, npc.name)
+  } else if (npc.action === 'shop') {
+    await say(npc.lines, npc.name)
+    openShop(game)
+  }
+}
+
+// 进门：有室内地图就走进去（从出口地垫上方一格进入、面朝上），否则用旧的对话方式
 game.enterBuilding = async (b) => {
   const s = game.save
+  const inside = b.interior && MAPS[b.interior]
+  if (inside) {
+    game.world.held = []
+    game.warp(inside.id, inside.entry.x, inside.entry.y, 'up')
+    return
+  }
   if (b.action === 'heal' || b.action === 'home') {
     s.party.forEach(healMon)
     if (b.action === 'heal') s.respawn = { map: game.world.map.id, x: b.door[0], y: b.door[1] + 1 }
@@ -468,9 +490,13 @@ game.startTrainer = async (npc) => {
 // —— PvP：邀请 / 接受 / 确定性回放 ——
 const pvpSnapshots = () => game.save.party.slice(0, PVP_TEAM).map((m) => snapshot(m, true))
 
-game.challenge = (p) => {
+game.challenge = (p0) => {
   const s = game.save
   if (!s.party.length) { toast('你还没有精灵！'); return }
+  // 名片可能是几分钟前打开的：对方刷新页面后连接 ID 会变，发送前按公钥重新找到当前在线的那个连接
+  const online = game.net.players()
+  const p = online.find((x) => x.pk === p0.pk && x.cid === p0.cid) || online.find((x) => x.pk === p0.pk)
+  if (!p) { toast(`${escapeHtml(p0.name || '对方')} 已经离线了。`); return }
   if (p.busy) { toast(`${escapeHtml(p.name)} 正在战斗中`); return }
   const id = randId(10)
   const c = {
@@ -491,24 +517,42 @@ game.challenge = (p) => {
   setTimeout(() => {
     const cur = game.net.challenges.get(id)
     if (cur?.status === 'pending') game.net.challenges.set(id, { ...cur, status: 'expired' })
-  }, 30000)
+  }, CHALLENGE_MS)
 }
 
+// 页面在后台时闪烁标题，免得错过邀请
+function attention(text) {
+  if (!document.hidden) return
+  const orig = document.title
+  let on = false
+  const iv = setInterval(() => { document.title = (on = !on) ? text : orig }, 900)
+  const stop = () => { clearInterval(iv); document.title = orig; removeEventListener('visibilitychange', stop) }
+  addEventListener('visibilitychange', stop)
+}
+
+const CHALLENGE_MS = 45000
 const seenChallenge = new Set()
+const inviteToasts = new Map()
 function onChallenge(c) {
-  if (!c || seenChallenge.has(c.id + c.status) || Date.now() - c.ts > 60000) return
+  // 时间窗口放宽到 2 分钟以容忍设备间的时钟误差；过期邀请由发起方主动标记 expired
+  if (!c || seenChallenge.has(c.id + c.status) || Math.abs(Date.now() - c.ts) > 120000) return
   seenChallenge.add(c.id + c.status)
   const me = game.signer.pubkey, cid = game.net.cid
-  if (c.to === me && c.toCid === cid && c.status === 'pending') {
-    if (game.battleUI.open || !game.save.party.length) { game.net.challenges.set(c.id, { ...c, status: 'busy' }); return }
+  // 同一个账号可能同时开着好几个标签页：邀请发给该公钥的所有页面，任一页面响应后其他页面的提示自动消失
+  if (c.status !== 'pending') { inviteToasts.get(c.id)?.remove(); inviteToasts.delete(c.id) }
+  const forMe = c.to === me
+  if (forMe && c.status === 'pending') {
+    // 正在战斗的页面不弹提示，交给同账号的其他页面；都没人响应时由发起方标记过期
+    if (game.battleUI.open || !game.save.party.length) return
     game.sys(`⚔ ${c.fromName} 向你发起了对战！`)
-    toast(`⚔ <b>${escapeHtml(c.fromName)}</b> 向你发起了对战！<br><span class="sub">双方各出前 ${PVP_TEAM} 只，状态全满</span>`, {
-      tone: 'gold', timeout: 28000,
+    attention('⚔ 对战邀请！')
+    inviteToasts.set(c.id, toast(`⚔ <b>${escapeHtml(c.fromName)}</b> 向你发起了对战！<br><span class="sub">双方各出前 ${PVP_TEAM} 只，状态全满</span>`, {
+      tone: 'gold', timeout: CHALLENGE_MS - 2000,
       actions: [
         { label: '接受', cls: 'primary', onClick: () => acceptChallenge(c.id) },
         { label: '拒绝', onClick: () => { const cur = game.net.challenges.get(c.id); if (cur?.status === 'pending') game.net.challenges.set(c.id, { ...cur, status: 'declined' }) } },
       ],
-    })
+    }))
   }
   if (c.from === me && c.fromCid === cid && c.id === game.pendingChallenge && c.status !== 'pending') {
     game.pendingChallenge = null
@@ -606,9 +650,14 @@ async function startPvp(bid, me) {
 // —— 赠礼 ——
 function onGifts() {
   const me = game.signer.pubkey
+  const claimed = (game.save.claimedGifts ||= [])
   game.net.gifts.forEach((g, k) => {
     if (g.to !== me) return
     game.net.gifts.delete(k)
+    // 中继可能回滚到旧快照，已领取过的礼物会“复活”：按 id 去重，并忽略一天前的礼物
+    if (claimed.includes(g.id || k) || Date.now() - (g.ts || 0) > 86400000) return
+    claimed.push(g.id || k)
+    if (claimed.length > 100) claimed.splice(0, claimed.length - 100)
     game.save.bag[g.item] = (game.save.bag[g.item] || 0) + g.n
     toast(`🎁 收到 <b>${escapeHtml(g.fromName)}</b> 赠送的 ${ITEMS[g.item]?.name || g.item} ×${g.n}！`, { tone: 'gold' })
     game.sys(`🎁 收到 ${g.fromName} 赠送的 ${ITEMS[g.item]?.name} ×${g.n}`)

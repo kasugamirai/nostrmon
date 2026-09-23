@@ -25,7 +25,7 @@ dark ink outlines (`src/three/materials.js`), saturated but soft palette, warm s
 
 ## Data you consume (read-only)
 
-`src/data/maps.js` → `MAPS[id]` (ids: `town`, `route1`, `village`, `forest`):
+`src/data/maps.js` → `MAPS[id]` (outdoor ids: `town`, `route1`, `village`, `forest`; plus 8 interiors, see below):
 ```
 { id, name, w, h, tiles: string[] (rows; chars below), solid: Uint8Array(w*h) (1 = blocked, includes buildings/trees/water/fences/rocks/signs),
   bg: '#hex' (void colour), battleBg: 'meadow'|'lake'|'forest', dark?: true (forest), spawn?: true, start?, respawn?,
@@ -53,6 +53,25 @@ Trainer look `{ skin, hair, shirt, pants, hat: 0 none|1 cap|2 beanie, hatColor }
 
 `src/data/moves.js` → `MOVES[id] = { name, type, power (0 = status), acc, pri?, effect? }`; `src/data/types.js` → `TYPES[type] = { name, color }`.
 Types: normal fire water grass electric ice rock ground flying bug ghost psychic dragon.
+
+## Interiors (added after the build started — World3D and terrain MUST support them)
+
+Every building has `interior: '<mapId>'`. Interior maps live in the same `MAPS` table with `interior: true`,
+`floor: 'w' | 'k'`, `entry: { x, y }`, `bg: '#15131f'`, no wild table and one exit warp on the mat tile `x`.
+The core handles the transition: bumping/interacting with a building door calls `game.enterBuilding(b)`, which calls
+`game.warp(interiorId, entry.x, entry.y, 'up')`; stepping on the mat `x` is an ordinary warp back to the tile in front of the door.
+Interior tile chars (all rows are indoor):
+`w` wood floor, `k` tiled floor, `R` rug (walkable), `x` exit door mat (walkable warp), `W` wall (solid; the top two rows
+are the back wall, column 0 and column w-1 are side walls), `C` counter (solid, waist-high), `b` bed (solid, 2 tiles tall
+vertically: top tile = headboard + pillow), `t` table, `c` chair / bench, `h` bookshelf (tall, against the back wall),
+`D` shop display shelf with goods, `P` potted plant, `M` healing machine with glowing orbs, `v` TV on a stand.
+3D rendering for `map.interior`: warm indoor lighting (no sun/sky; a few soft point lights or a hemisphere + directional
+with short shadows), floor mesh from `floor`/`R`/`x`, back wall ~2.2 units tall with windows/pictures, side walls lower
+(~1.2) or faded when they would hide the player, furniture as simple cel-shaded props, a dark void (`bg`) around the room,
+camera closer (distance ~6.5, higher pitch) and clamped so the room stays framed. No outdoor scenery ring.
+NPCs may have `action: 'heal' | 'shop' | 'home'`; the core's `game.talkNpc` handles it. NPCs standing behind a counter
+must be reachable: in `interact()`, if the tile in front of the player is a counter `C`, talk to an NPC on the tile beyond it;
+clicking such an NPC walks the player to the tile in front of the counter.
 
 ## Shared core API (`game`, from `src/core/game.js`) available to World3D / controls / battle UI
 

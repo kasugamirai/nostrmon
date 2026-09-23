@@ -115,7 +115,87 @@ function drawTile(ctx, map, x, y, frame) {
       R(2, 0, 1, 16, '#6b4424'); R(13, 0, 1, 16, '#6b4424')
       break
     }
+    // —— 室内 ——
+    case 'w': wood(); break
+    case 'k': tilesFloor(); break
+    case 'R': {
+      floor()
+      const isRug = (tt) => tt === 'R'
+      R(0, 0, 16, 16, '#c0504d')
+      R(2, 2, 12, 12, '#d8665f')
+      for (let k = 0; k < 4; k++) R(4 + k * 3, 7, 2, 2, '#f2c14e')
+      if (!isRug(tileAt(map, x, y - 1))) R(0, 0, 16, 2, '#f2c14e')
+      if (!isRug(tileAt(map, x, y + 1))) R(0, 14, 16, 2, '#f2c14e')
+      if (!isRug(tileAt(map, x - 1, y))) R(0, 0, 2, 16, '#f2c14e')
+      if (!isRug(tileAt(map, x + 1, y))) R(14, 0, 2, 16, '#f2c14e')
+      break
+    }
+    case 'x': floor(); R(1, 3, 14, 11, '#6b4424'); R(2, 4, 12, 9, '#8a5a2b'); for (let k = 0; k < 3; k++) R(3, 5 + k * 3, 10, 1, '#b07a47'); break
+    case 'W': {
+      if (tileAt(map, x, y + 1) === 'W') { R(0, 0, 16, 16, '#3b3552'); R(0, 15, 16, 1, '#57507a'); break }
+      R(0, 0, 16, 16, '#f3e6c8')
+      for (let k = 0; k < 16; k += 4) R(k + 1, 0, 1, 13, '#e8d6ad')
+      R(0, 0, 16, 2, '#57507a')
+      R(0, 13, 16, 3, '#8a5a2b'); R(0, 13, 16, 1, '#b07a47')
+      if (x % 4 === 2) { R(3, 3, 10, 8, '#5a4632'); R(4, 4, 8, 6, '#9fdcff'); R(4, 4, 8, 2, '#d7f3ff'); R(7, 4, 1, 6, '#5a4632') }
+      break
+    }
+    case 'C': {
+      floor()
+      R(0, 1, 16, 7, '#e8d2a8'); R(0, 1, 16, 1, '#f6e6c6')
+      R(0, 8, 16, 7, '#b07a47'); R(0, 8, 16, 1, '#8a5a2b'); R(0, 14, 16, 1, '#6b4424')
+      R(3, 10, 10, 3, '#9a6a3a')
+      break
+    }
+    case 'b': {
+      floor()
+      const top = tileAt(map, x, y + 1) === 'b'
+      R(1, 0, 14, 16, '#8a5a2b')
+      if (top) { R(1, 1, 14, 4, '#6b4424'); R(2, 5, 12, 11, '#ffffff'); R(4, 7, 8, 5, '#eef3fb') }
+      else { R(2, 0, 12, 13, '#5b8def'); R(2, 0, 12, 2, '#ffffff'); R(2, 13, 12, 2, '#6b4424') }
+      break
+    }
+    case 't': floor(); R(1, 3, 14, 9, '#b07a47'); R(1, 3, 14, 2, '#d09a63'); R(2, 12, 2, 4, '#6b4424'); R(12, 12, 2, 4, '#6b4424'); break
+    case 'c': floor(); R(3, 2, 10, 4, '#a8663a'); R(3, 6, 10, 6, '#c47b45'); R(3, 12, 2, 3, '#6b4424'); R(11, 12, 2, 3, '#6b4424'); break
+    case 'h': {
+      floor()
+      R(1, 0, 14, 16, '#7a4f2a'); R(2, 1, 12, 14, '#5e3a1d')
+      const books = ['#e84a5f', '#3a86ff', '#2ec4b6', '#ffc43d', '#8e5cf7', '#f4f4f4']
+      for (let row = 0; row < 3; row++) {
+        for (let k = 0; k < 5; k++) R(2 + k * 2 + (row % 2), 2 + row * 5, 2, 3 + ((k + x) % 2), books[(k + row + x) % books.length])
+        R(2, 5 + row * 5, 12, 1, '#7a4f2a')
+      }
+      break
+    }
+    case 'D': {
+      floor()
+      R(0, 2, 16, 13, '#9aa5b1'); R(0, 2, 16, 1, '#c3ccd6'); R(0, 8, 16, 1, '#7b8794')
+      const cols = ['#ef476f', '#1fb5a3', '#ffc43d', '#3a86ff', '#8e5cf7']
+      for (let k = 0; k < 4; k++) { R(1 + k * 4, 4, 3, 4, cols[(k + x) % cols.length]); R(1 + k * 4, 10, 3, 4, cols[(k + x + 2) % cols.length]) }
+      break
+    }
+    case 'P': floor(); R(5, 10, 6, 5, '#c96b3b'); R(5, 10, 6, 1, '#e08a5a'); disc(8, 6, 5, '#3f8f46'); disc(7, 5, 3, '#66be62'); break
+    case 'M': {
+      floor()
+      R(1, 2, 14, 13, '#e9eef5'); R(1, 2, 14, 3, '#ef476f'); R(1, 14, 14, 1, '#b9c3cf')
+      for (let k = 0; k < 3; k++) { disc(4 + k * 4, 8, 1, frame ? '#9fe8ff' : '#6fd3f5'); disc(4 + k * 4, 11, 1, frame ? '#6fd3f5' : '#9fe8ff') }
+      break
+    }
+    case 'v': floor(); R(1, 3, 14, 9, '#1c1a2e'); R(2, 4, 12, 7, frame ? '#3a6ea5' : '#2f5f93'); R(3, 5, 4, 2, '#8fc3ff'); R(6, 12, 4, 3, '#555'); break
     default: grass()
+  }
+
+  function floor() { if (map.floor === 'k') tilesFloor(); else wood() }
+  function wood() {
+    R(0, 0, 16, 16, '#c9925a')
+    for (let k = 0; k < 4; k++) R(0, k * 4 + 3, 16, 1, '#b07a47')
+    for (let k = 0; k < 4; k++) R(((x * 5 + k * 7) % 12) + 2, k * 4, 1, 3, '#b07a47')
+    R(0, 0, 16, 1, '#d6a36c')
+  }
+  function tilesFloor() {
+    R(0, 0, 16, 16, '#e9eef5')
+    R(0, 0, 8, 8, (x + y) % 2 ? '#dfe6ef' : '#e9eef5'); R(8, 8, 8, 8, (x + y) % 2 ? '#dfe6ef' : '#e9eef5')
+    R(0, 0, 16, 1, '#cfd7e3'); R(0, 0, 1, 16, '#cfd7e3')
   }
 }
 

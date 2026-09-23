@@ -103,6 +103,13 @@ export class World {
     const npc = this.map.npcs.find((n) => n.x === gx && (n.y === gy || n.y === gy + 1))
     if (npc) {
       if (Math.abs(npc.x - this.p.x) + Math.abs(npc.y - this.p.y) === 1) { this.face(npc.x, npc.y); this.g.talkNpc(npc); return }
+      if (tileAt(this.map, npc.x, npc.y + 1) === 'C') {
+        // 柜台后面的 NPC：走到柜台前，面朝柜台说话
+        if (this.p.x === npc.x && this.p.y === npc.y + 2) { this.face(npc.x, npc.y + 1); this.interact(); return }
+        this.walkTo(npc.x, npc.y + 2, false)
+        if (this.path) this.path.then = [npc.x, npc.y + 1]
+        return
+      }
       this.walkTo(npc.x, npc.y, true)
       return
     }
@@ -213,7 +220,9 @@ export class World {
     const p = this.p
     const [dx, dy] = DIRS[p.dir]
     const x = p.x + dx, y = p.y + dy
-    const npc = this.map.npcs.find((n) => n.x === x && n.y === y)
+    // 隔着柜台也能和店员/护士说话
+    const reach = tileAt(this.map, x, y) === 'C' ? [x + dx, y + dy] : [x, y]
+    const npc = this.map.npcs.find((n) => (n.x === x && n.y === y) || (n.x === reach[0] && n.y === reach[1]))
     if (npc) return this.g.talkNpc(npc)
     const sign = this.map.signs[`${x},${y}`]
     if (sign) return this.g.say([sign])
