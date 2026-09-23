@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>Nostrmon 像素精灵</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Silkscreen:wght@400;700&family=ZCOOL+QingKe+HuangYou&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="world" aria-label="游戏地图"></canvas>
+
+    <div id="hud-left" class="hud">
+      <button id="me-chip" class="chip" title="训练家与 Nostr 身份">
+        <canvas id="me-avatar" width="18" height="22"></canvas>
+        <span class="me-text"><b id="me-name">…</b><small id="me-key" class="mono">npub…</small></span>
+      </button>
+      <div id="coins" class="chip coin" title="金币"><i></i><span class="mono">0</span></div>
+    </div>
+
+    <div id="hud-right" class="hud">
+      <div id="net-pill" class="pill" title="Yjs 实时同步"><i class="dot"></i><span>Yjs</span></div>
+      <div id="nostr-pill" class="pill" title="Nostr relay"><i class="dot"></i><span>Nostr</span></div>
+      <button id="online-btn" class="pill btnish" title="在线训练家">在线 <b id="online-count" class="mono">1</b></button>
+      <button id="menu-btn" class="btn primary">菜单</button>
+    </div>
+
+    <div id="map-banner" aria-live="polite"></div>
+    <div id="party-bar"></div>
+
+    <section id="chat">
+      <button id="chat-toggle" class="pill btnish" aria-expanded="true">聊天</button>
+      <div id="chat-body">
+        <div id="chat-log" aria-live="polite"></div>
+        <div id="emote-row"></div>
+        <form id="chat-form" autocomplete="off">
+          <input id="chat-input" maxlength="120" placeholder="按 Enter 聊天，所有人实时可见" />
+          <button class="btn small" type="submit">发送</button>
+        </form>
+      </div>
+    </section>
+
+    <div id="touch">
+      <div class="dpad">
+        <button data-dir="up" aria-label="上">▲</button>
+        <button data-dir="left" aria-label="左">◀</button>
+        <button data-dir="right" aria-label="右">▶</button>
+        <button data-dir="down" aria-label="下">▼</button>
+      </div>
+      <div class="ab">
+        <button id="btn-b" aria-label="奔跑">B</button>
+        <button id="btn-a" aria-label="互动">A</button>
+      </div>
+    </div>
+
+    <div id="dialog" class="panel" hidden>
+      <div id="dialog-name"></div>
+      <div id="dialog-text"></div>
+      <i class="caret">▼</i>
+    </div>
+
+    <div id="toasts"></div>
+
+    <div id="modal-wrap" hidden>
+      <div id="modal" class="panel" role="dialog" aria-modal="true"></div>
+    </div>
+
+    <section id="battle" hidden>
+      <div id="b-scene">
+        <div class="b-info foe" id="b-foe-info"></div>
+        <div class="b-plat foe"></div>
+        <div class="b-slot foe"><canvas class="b-mon" id="b-foe" width="64" height="64"></canvas></div>
+        <div class="b-plat me"></div>
+        <div class="b-slot me"><canvas class="b-mon" id="b-me" width="64" height="64"></canvas></div>
+        <div class="b-info me" id="b-me-info"></div>
+        <canvas id="b-ball" width="16" height="16" hidden></canvas>
+        <div id="b-top"></div>
+      </div>
+      <div id="b-bottom">
+        <div id="b-msg" class="panel"></div>
+        <div id="b-menu"></div>
+      </div>
+    </section>
+
+    <div id="loading">
+      <div class="load-card">
+        <h1>Nostrmon<span>像素精灵</span></h1>
+        <ol id="load-steps"></ol>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
