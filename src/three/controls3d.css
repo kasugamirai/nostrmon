@@ -1,0 +1,104 @@
+/* —— 3D 版触屏操控（只在 pointer: coarse 设备上由 controls3d.js 生成） —— */
+#touch3d {
+  --t3-safe-l: env(safe-area-inset-left, 0px);
+  --t3-safe-r: env(safe-area-inset-right, 0px);
+  --t3-pad: 16px;
+  position: absolute; inset: 0; z-index: 7; pointer-events: none;
+  transition: opacity 0.2s, visibility 0.2s;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+}
+#touch3d:empty { display: none; }
+#touch3d.t3-hide { opacity: 0; visibility: hidden; }
+#touch3d.t3-hide * { pointer-events: none !important; }
+
+/* 摇杆 */
+.t3-stick {
+  position: absolute; left: calc(var(--t3-pad) + var(--t3-safe-l)); bottom: calc(18px + var(--safe-b));
+  width: 136px; height: 136px; display: grid; place-items: center;
+  pointer-events: auto; touch-action: none; transition: opacity 0.2s;
+}
+.t3-base {
+  position: relative; width: 116px; height: 116px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.72), rgba(230, 235, 245, 0.62) 62%, rgba(201, 209, 227, 0.66));
+  border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink), inset 0 0 0 2px rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  transition: transform 0.15s;
+}
+.t3-base::before {
+  content: ''; position: absolute; inset: 15px; border-radius: 50%; border: 2px dashed rgba(28, 26, 46, 0.22);
+}
+.t3-arrow {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0; margin: -5px 0 0 -6px;
+  border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 8px solid rgba(28, 26, 46, 0.4);
+}
+.t3-arrow.up { transform: rotate(0deg) translateY(-44px); }
+.t3-arrow.right { transform: rotate(90deg) translateY(-44px); }
+.t3-arrow.down { transform: rotate(180deg) translateY(-44px); }
+.t3-arrow.left { transform: rotate(270deg) translateY(-44px); }
+.t3-dir {
+  position: absolute; inset: -3px; border-radius: 50%; opacity: 0; pointer-events: none;
+  transition: opacity 0.12s;
+}
+.t3-dir::before {
+  content: ''; position: absolute; left: 50%; top: -9px; width: 0; height: 0; margin-left: -10px;
+  border-left: 10px solid transparent; border-right: 10px solid transparent; border-bottom: 12px solid var(--coral);
+  filter: drop-shadow(0 0 1.5px var(--ink)) drop-shadow(0 0 0.5px var(--ink));
+}
+.t3-knob {
+  position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #fff 0 22%, var(--paper) 23% 60%, var(--paper-2) 61%);
+  border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink);
+  transition: transform 0.16s cubic-bezier(0.3, 1.6, 0.5, 1), background 0.15s;
+}
+.t3-knob::after {
+  content: ''; position: absolute; inset: 14px; border-radius: 50%; background: var(--line); transition: background 0.15s;
+}
+.t3-stick.on .t3-base { transform: scale(1.04); }
+.t3-stick.on .t3-knob { transition: background 0.15s; }
+.t3-stick.on .t3-knob::after { background: var(--coral); }
+#touch3d.t3-talk .t3-stick { opacity: 0.3; pointer-events: none; }
+
+/* A / B */
+.t3-ab {
+  position: absolute; right: calc(var(--t3-pad) + var(--t3-safe-r)); bottom: calc(18px + var(--safe-b));
+  width: 146px; height: 124px; pointer-events: none;
+}
+.t3-btn {
+  position: absolute; border-radius: 50%; border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink), inset 0 -5px 0 rgba(0, 0, 0, 0.12);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; padding: 0;
+  pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
+  transition: transform 0.06s, box-shadow 0.06s, filter 0.1s;
+}
+.t3-btn b { font: 700 22px/1 var(--mono); }
+.t3-btn small { font: 700 10px/1.2 var(--body); letter-spacing: 0.1em; margin-top: 2px; opacity: 0.85; }
+.t3-btn.on { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink), inset 0 -2px 0 rgba(0, 0, 0, 0.12); filter: brightness(0.95); }
+.t3-a { right: 0; top: 0; width: 72px; height: 72px; background: var(--coral); color: #fff; }
+.t3-a b { font-size: 26px; text-shadow: 0 2px 0 rgba(28, 26, 46, 0.35); }
+.t3-b { left: 0; bottom: 4px; width: 58px; height: 58px; background: var(--paper); color: var(--ink); }
+.t3-b.on { background: var(--gold); }
+#touch3d.t3-talk .t3-b { opacity: 0; pointer-events: none; }
+
+/* —— 触屏时让开 HUD：聊天与队伍栏上移，对话框浮在按钮上方 —— */
+#app.touch3d-on #party-bar { right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(152px + var(--safe-b)); }
+#app.touch3d-on #chat { left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(222px + var(--safe-b)); width: min(380px, calc(100vw - 24px)); }
+#app.touch3d-on #chat-log { height: 104px; }
+#app.touch3d-on #dialog { bottom: calc(152px + var(--safe-b)); }
+#app.touch3d-on.t3-talking #party-bar { visibility: hidden; }
+
+@media (max-width: 400px) {
+  #touch3d { --t3-pad: 12px; }
+  #app.touch3d-on #party-bar { gap: 3px; }
+  #app.touch3d-on .pslot { width: 40px; }
+  #app.touch3d-on .pslot canvas { width: 30px; height: 30px; }
+}
+
+/* 横屏手机：高度紧张，队伍栏放到两组按钮中间，聊天框变矮 */
+@media (max-height: 500px) and (orientation: landscape) {
+  .t3-stick { bottom: calc(10px + var(--safe-b)); }
+  .t3-ab { bottom: calc(10px + var(--safe-b)); }
+  #app.touch3d-on #party-bar { right: 50%; transform: translateX(50%); bottom: calc(10px + var(--safe-b)); }
+  #app.touch3d-on #chat { bottom: calc(160px + var(--safe-b)); width: min(340px, calc(50vw - 24px)); }
+  #app.touch3d-on #chat-log { height: 56px; }
+  #app.touch3d-on #dialog { bottom: calc(12px + var(--safe-b)); width: min(560px, calc(100vw - 340px)); }
+  #app.touch3d-on.t3-talking #party-bar { visibility: hidden; }
+}

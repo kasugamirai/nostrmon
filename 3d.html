@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <title>Nostrmon 像素精灵</title>
+  <title>Nostrmon 3D</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=Silkscreen:wght@400;700&family=ZCOOL+QingKe+HuangYou&display=swap" rel="stylesheet" />
@@ -11,7 +11,7 @@
 </head>
 <body>
   <div id="app">
-    <canvas id="world" aria-label="游戏地图"></canvas>
+    <canvas id="world" aria-label="3D 游戏世界"></canvas>
 
     <div id="hud-left" class="hud">
       <button id="me-chip" class="chip" title="训练家与 Nostr 身份">
@@ -25,7 +25,7 @@
       <div id="net-pill" class="pill" title="Yjs 实时同步"><i class="dot"></i><span>Yjs</span></div>
       <div id="nostr-pill" class="pill" title="Nostr relay"><i class="dot"></i><span>Nostr</span></div>
       <button id="online-btn" class="pill btnish" title="在线训练家">在线 <b id="online-count" class="mono">1</b></button>
-      <a id="mode-link" class="pill btnish" href="./3d.html" title="切换到 3D 版">3D 版</a>
+      <a id="mode-link" class="pill btnish" href="./" title="切换到 2D 像素版">2D 版</a>
       <button id="menu-btn" class="btn primary">菜单</button>
     </div>
 
@@ -44,18 +44,7 @@
       </div>
     </section>
 
-    <div id="touch">
-      <div class="dpad">
-        <button data-dir="up" aria-label="上">▲</button>
-        <button data-dir="left" aria-label="左">◀</button>
-        <button data-dir="right" aria-label="右">▶</button>
-        <button data-dir="down" aria-label="下">▼</button>
-      </div>
-      <div class="ab">
-        <button id="btn-b" aria-label="奔跑">B</button>
-        <button id="btn-a" aria-label="互动">A</button>
-      </div>
-    </div>
+    <div id="touch3d"></div>
 
     <div id="dialog" class="panel" hidden>
       <div id="dialog-name"></div>
@@ -71,13 +60,13 @@
 
     <section id="battle" hidden>
       <div id="b-scene">
+        <canvas id="b-3d" aria-label="战斗画面"></canvas>
         <div class="b-info foe" id="b-foe-info"></div>
-        <div class="b-plat foe"></div>
-        <div class="b-slot foe"><canvas class="b-mon" id="b-foe" width="64" height="64"></canvas></div>
-        <div class="b-plat me"></div>
-        <div class="b-slot me"><canvas class="b-mon" id="b-me" width="64" height="64"></canvas></div>
         <div class="b-info me" id="b-me-info"></div>
+        <canvas class="b-mon" id="b-foe" width="64" height="64" hidden></canvas>
+        <canvas class="b-mon" id="b-me" width="64" height="64" hidden></canvas>
         <canvas id="b-ball" width="16" height="16" hidden></canvas>
+        <div id="b-fx"></div>
         <div id="b-top"></div>
       </div>
       <div id="b-bottom">
@@ -88,11 +77,11 @@
 
     <div id="loading">
       <div class="load-card">
-        <h1>Nostrmon<span>像素精灵</span></h1>
+        <h1>Nostrmon<span>3D 世界</span></h1>
         <ol id="load-steps"></ol>
       </div>
     </div>
   </div>
-  <script type="module" src="/src/main.js"></script>
+  <script type="module" src="/src/three/main3d.js"></script>
 </body>
 </html>
