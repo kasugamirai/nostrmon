@@ -8,7 +8,7 @@ import { SPECIES } from '../data/species.js'
 import { buildTerrain } from './terrain.js'
 import { buildInterior } from './interior.js'
 import { buildTrainer, buildCreature } from './models.js'
-import { toonMat, addOutline } from './materials.js'
+import { toonMat, addOutline, OCCLUDE } from './materials.js'
 import './world3d.css'
 
 const WALK = 3.6, RUN = 6.2, R = 0.28
@@ -21,6 +21,11 @@ const WILD_SCALE = 0.88
 const REACH = [0.55, 0.95]
 const AXES = ['x', 'y', 'z']
 const SHADOW_HALF = 14, SHADOW_RES = 2048
+// 坐骑：速度倍率、模型缩放（与 2D 版一致：骑乘 ×1.75）
+const RIDE_MUL = 1.75, MOUNT_SCALE = 1.35
+const TAG_Y = 1.42
+// 地图缓存：当前 + 最近去过的两张（town ↔ 室内来回不重建），更早的释放 GPU 资源
+const MAP_CACHE = 3
 const SUN_OFFSET = new THREE.Vector3(-7, 16, 9)
 
 // 白天 / 森林（夜）两套氛围
@@ -68,14 +73,66 @@ function repop(e) {
   void e.offsetWidth
   e.classList.add('w3d-pop')
 }
-function castShadows(root) {
-  root.traverse((o) => { if (o.isMesh && !o.userData.isOutline) o.castShadow = true })
+// 次要角色（NPC、远端玩家、野生精灵…）只让最大的几块部件投影：阴影轮廓几乎不变，阴影 pass 的 draw call 少很多。
+// 本地玩家、跟随精灵、自己的坐骑保留模型自带的完整投影设置（models.js finalize）。
+function lightShadows(root, n = 3) {
+  const list = []
+  root.traverse((o) => {
+    if (!o.isMesh || o.userData.isOutline || !o.castShadow) return
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere()
+    list.push(o)
+  })
+  list.sort((a, b) => b.geometry.boundingSphere.radius - a.geometry.boundingSphere.radius)
+  for (let i = 0; i < list.length; i++) list[i].castShadow = i < n
   return root
 }
 function disposeModel(m) {
   if (!m) return
   m.removeFromParent()
   m.userData.dispose?.()
+}
+
+// 坐骑模型：放大 MOUNT_SCALE，并测出背部“鞍位”（相对模型原点，已含缩放）
+const _seatRay = new THREE.Raycaster()
+const _seatBox = new THREE.Box3()
+function buildMount(sp, light) {
+  const m = buildCreature(sp)
+  if (light) lightShadows(m, 3)
+  m.scale.setScalar(MOUNT_SCALE)
+  m.updateMatrixWorld(true)
+  const body = m.userData.parts?.body || m
+  _seatBox.setFromObject(body)
+  const cz = Number.isFinite(_seatBox.min.z) ? (_seatBox.min.z + _seatBox.max.z) / 2 : 0
+  _seatRay.set(new THREE.Vector3(0, 10, cz), new THREE.Vector3(0, -1, 0))
+  const hit = _seatRay.intersectObject(body, true).find((h) => !h.object.userData.isOutline)
+  const top = Number.isFinite(_seatBox.max.y) ? _seatBox.max.y : MOUNT_SCALE * 0.7
+  m.userData.seatY = hit ? hit.point.y : top * 0.9
+  m.userData.seatZ = cz
+  return m
+}
+// 骑乘姿势：腿向前分开跨坐，双手前伸扶着鬃毛（在 trainer.animate 之后调用）
+function seatPose(trainer, on) {
+  const P = trainer.userData.parts
+  if (!P) return
+  const [lL, lR] = P.legs, [aL, aR] = P.arms
+  if (on) {
+    lL.rotation.set(-1.25, 0, -0.5)
+    lR.rotation.set(-1.25, 0, 0.5)
+    aL.rotation.set(-0.75, 0, -0.12)
+    aR.rotation.set(-0.75, 0, 0.12)
+  } else {
+    lL.rotation.z = 0
+    lR.rotation.z = 0
+  }
+}
+// 把骑手放到坐骑背上（坐骑与骑手同在 root 下；返回骑手抬高量，用于名字标签）
+function placeRider(trainer, mount, heading) {
+  const u = mount.userData
+  const bob = (u.parts?.motion?.position.y || 0) * MOUNT_SCALE
+  const y = u.seatY - 0.2 + bob
+  trainer.position.set(Math.sin(heading) * u.seatZ, y, Math.cos(heading) * u.seatZ)
+  mount.rotation.y = heading
+  return u.seatY - 0.2
 }
 // CSS2DObject 只在自身被 remove 时清理 DOM；整组摘下前先手动隐藏
 function hideLabels(root) {
@@ -293,7 +350,17 @@ class Trail {
 
 const _tp = { x: 0, z: 0 }
 class Follower {
-  constructor(parent) { this.parent = parent; this.model = null; this.key = ''; this.pos = new THREE.Vector3(); this.heading = 0; this.spd = 0; this.trail = new Trail() }
+  constructor(parent, light = false) {
+    this.parent = parent; this.light = light; this.hidden = false
+    this.model = null; this.key = ''; this.pos = new THREE.Vector3(); this.heading = 0; this.spd = 0; this.trail = new Trail()
+  }
+  // 骑乘时收起跟随精灵（仍在后台沿足迹跟随，下坐骑时从身后出现）
+  setHidden(h) {
+    h = !!h
+    if (h === this.hidden) return
+    this.hidden = h
+    if (this.model) this.model.visible = !h
+  }
   set(info) {
     const key = info && SPECIES[info.sp] ? info.sp + '|' + !!info.shiny : ''
     if (key === this.key) return
@@ -301,7 +368,9 @@ class Follower {
     disposeModel(this.model)
     this.model = null
     if (!key) return
-    this.model = castShadows(buildCreature(info.sp, { shiny: !!info.shiny }))
+    this.model = buildCreature(info.sp, { shiny: !!info.shiny })
+    if (this.light) lightShadows(this.model, 3)
+    this.model.visible = !this.hidden
     this.model.scale.setScalar(0.7)
     this.model.position.copy(this.pos)
     this.model.rotation.y = this.heading
@@ -334,7 +403,7 @@ class Follower {
     const moving = this.spd > 0.45
     this.model.position.copy(this.pos)
     this.model.rotation.y = this.heading
-    this.model.userData.animate?.(t, { moving, speed: Math.min(1, this.spd / RUN) })
+    if (!this.hidden) this.model.userData.animate?.(t, { moving, speed: Math.min(1, this.spd / RUN) })
   }
   dispose() { disposeModel(this.model); this.model = null; this.key = '' }
 }
@@ -354,8 +423,9 @@ class Tag {
     this.obj = new CSS2DObject(this.root)
     this.obj.center.set(0.5, 1)
     parent.add(this.obj)
-    this.nameText = null; this.busy = false; this.bKey = 0; this.eKey = 0
+    this.nameText = null; this.busy = false; this.bKey = 0; this.eKey = 0; this.dim = false
   }
+  setDim(d) { if (d !== this.dim) { this.dim = d; this.name.classList.toggle('w3d-dim', d) } }
   setName(t, busy = false) {
     if (t !== this.nameText) { this.nameText = t; this.name.textContent = t }
     if (busy !== this.busy) { this.busy = busy; this.name.classList.toggle('busy', busy) }
@@ -387,6 +457,7 @@ function simpleLabel(parent, cls, text) {
 
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3()
 const _ndc = new THREE.Vector2()
+const _s1 = new THREE.Vector2(), _s2 = new THREE.Vector2(), _s3 = new THREE.Vector2(), _db = new THREE.Vector2()
 const _ray = new THREE.Raycaster()
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
 
@@ -412,6 +483,8 @@ export class World3D {
     this.time = 0
     this.last = performance.now()
     this.lastSent = 0
+    this.sentDir = ''
+    this.sentRy = 0
     this.doorAt = -1e9
     this.stuckT = 0
     this.contactAt = 0
@@ -432,6 +505,10 @@ export class World3D {
     this.ptrs = new Map()
     this.pinch = null
     this.markT = 1
+    this.viewDy = 0
+    this.chatRect = null
+    this.nextChatCheck = 0
+    this.meTagW = 0
 
     // 镜头
     this.yaw = this.yawT = 0
@@ -478,7 +555,7 @@ export class World3D {
     this.fireflies = new Map()
 
     // 玩家
-    this.me = { root: new THREE.Group(), model: null, lookKey: '', tag: new Tag(this.labels, 'me') }
+    this.me = { root: new THREE.Group(), model: null, lookKey: '', tag: new Tag(this.labels, 'me'), mount: null, mountKey: '', lift: 0 }
     this.scene.add(this.me.root)
     this.fol = new Follower(this.scene)
     this.refreshLook(true)
@@ -545,14 +622,19 @@ export class World3D {
   // —— 地图 ——
   entryFor(map) {
     let e = this.maps.get(map.id)
-    if (e) return e
+    if (e) {
+      // 最近使用的排到最后（Map 保持插入顺序）
+      this.maps.delete(map.id)
+      this.maps.set(map.id, e)
+      return e
+    }
     const terrain = map.interior ? buildInterior(map) : buildTerrain(map)
     const npcRoot = new THREE.Group()
     const labelRoot = new THREE.Group()
     const npcs = map.npcs.map((npc) => {
       const root = new THREE.Group()
       root.position.set(npc.x + 0.5, 0, npc.y + 0.5)
-      const model = castShadows(buildTrainer(npc.look))
+      const model = lightShadows(buildTrainer(npc.look))
       const heading = DIR_RY[npc.dir] ?? 0
       model.rotation.y = heading
       root.add(model, pickProxy('npc', npc))
@@ -574,9 +656,24 @@ export class World3D {
     })
     const boxes = map.buildings.map((b) => ({ b, box: new THREE.Box3(new THREE.Vector3(b.x, 0, b.y), new THREE.Vector3(b.x + b.w, 3.2, b.y + b.h)) }))
     const npcTiles = new Set(map.npcs.map((n) => n.y * map.w + n.x))
-    e = { terrain, npcRoot, labelRoot, npcs, bld, boxes, npcTiles }
+    e = { id: map.id, terrain, npcRoot, labelRoot, npcs, bld, boxes, npcTiles }
     this.maps.set(map.id, e)
     return e
+  }
+
+  // 释放最久没去过的地图（地形几何 / 实例、NPC 模型、标签 DOM、萤火虫）
+  trimMaps() {
+    for (const [id, e] of this.maps) {
+      if (this.maps.size <= MAP_CACHE) break
+      if (e === this.entry) continue
+      this.maps.delete(id)
+      e.terrain.dispose?.()
+      for (const a of e.npcs) disposeModel(a.model)
+      e.npcRoot.clear()
+      for (const o of [...e.labelRoot.children]) o.removeFromParent() // CSS2DObject 在 removed 事件里移除自己的 DOM
+      const f = this.fireflies.get(id)
+      if (f) { f.removeFromParent(); f.geometry.dispose(); this.fireflies.delete(id) }
+    }
   }
 
   loadMap(id, x, y, dir = 'down') {
@@ -607,7 +704,9 @@ export class World3D {
     this.fol.reset(this.pos.x, this.pos.z, this.heading, (fx, fz) => !this.hits(fx, fz))
     this.lantern.position.set(this.pos.x + 0.5, 1.5, this.pos.z)
     this.nextRemotePoll = this.nextSpawnPoll = 0
+    this.syncMount()
     this.updateCamera(0, true)
+    this.trimMaps()
   }
 
   applyAtmosphere(map) {
@@ -964,14 +1063,25 @@ export class World3D {
       this.nextLookCheck = pnow + 1000
       this.refreshLook()
       this.me.tag.setName('✓ ' + (this.g.save?.name || '训练家'), this.g.battleUI?.open === true)
+      this.meTagW = 0
     }
     if (pnow >= this.nextLeadCheck) { this.nextLeadCheck = pnow + 400; this.fol.set(this.g.leadInfo?.()) }
+    this.syncMount()
     this.updatePlayer(dt, pnow)
-    const pos = this.pos
-    this.me.root.position.copy(pos)
-    if (this.me.model) {
-      this.me.model.rotation.y = this.heading
-      this.me.model.userData.animate?.(t, { speed: animSpeed(this.vel.length()) })
+    const pos = this.pos, me = this.me
+    me.root.position.copy(pos)
+    if (me.model) {
+      me.model.rotation.y = this.heading
+      if (me.mount) {
+        const v = this.vel.length()
+        me.model.userData.animate?.(t, { speed: 0 })
+        me.mount.userData.animate?.(t, { moving: v > 0.3, speed: Math.min(1, v / (RUN * RIDE_MUL)) })
+        seatPose(me.model, true)
+        me.lift = placeRider(me.model, me.mount, this.heading)
+      } else {
+        me.model.userData.animate?.(t, { speed: animSpeed(this.vel.length()) })
+        me.lift = 0
+      }
     }
     this.fol.update(dt, t, pos.x, pos.z)
     this.updateNpcs(dt, t)
@@ -981,6 +1091,7 @@ export class World3D {
     if (pnow >= this.nextSpawnPoll) { this.nextSpawnPoll = pnow + 250; this.pollSpawns() }
     this.updateSpawns(dt, t)
     this.updateCamera(dt, false)
+    this.updateOcclusion()
     this.updateLights(dt, t)
     this.entry.terrain.update?.(t, pos)
     this.updateLabels(now)
@@ -1017,7 +1128,7 @@ export class World3D {
         if (mag > 0) { wx = this.pdx; wz = this.pdz }
       }
     }
-    const speed = (this.running ? RUN : WALK) * mag
+    const speed = (this.running ? RUN : WALK) * mag * (this.me.mountKey ? RIDE_MUL : 1)
     const k = damp(mag > 0 ? 12 : 18, dt)
     vel.x += (wx * speed - vel.x) * k
     vel.y += (wz * speed - vel.y) * k
@@ -1065,7 +1176,10 @@ export class World3D {
       else if (!w) this.g.onArrive(tx, ty, tileAt(this.map, tx, ty))
     }
     const moving = vel.lengthSq() > 0.04
-    if (moving ? pnow - this.lastSent >= 100 : this.moving) this.sendPresence()
+    // 原地转身（面向 NPC / 告示牌、顶着墙按方向键）也要广播朝向，与 2D 版的 face() / step() 一致
+    const turned = this.p.dir !== this.sentDir || Math.abs(wrapAngle(this.heading - this.sentRy)) > 0.1
+    if (moving || turned) { if (pnow - this.lastSent >= 100) this.sendPresence() }
+    else if (this.moving) this.sendPresence()
     this.moving = moving
   }
 
@@ -1231,6 +1345,8 @@ export class World3D {
     if (!this.map) return
     const p = this.p, pos = this.pos
     this.lastSent = performance.now()
+    this.sentDir = p.dir
+    this.sentRy = wrapAngle(this.heading)
     this.g.net?.setPresence({
       map: this.map.id, x: p.x, y: p.y, dir: p.dir,
       fx: round(pos.x, 1000), fy: round(pos.z, 1000), ry: round(wrapAngle(this.heading), 100), moving: this.vel.lengthSq() > 0.04,
@@ -1264,9 +1380,29 @@ export class World3D {
     if (!force && key === this.me.lookKey) return
     this.me.lookKey = key
     disposeModel(this.me.model)
-    this.me.model = castShadows(buildTrainer(look))
+    this.me.model = buildTrainer(look)
     this.me.model.rotation.y = this.heading
     this.me.root.add(this.me.model)
+  }
+
+  // —— 坐骑（本地）——
+  syncMount() {
+    const me = this.me
+    const sp = this.g.isRiding?.() ? this.g.save?.mount : null
+    const key = sp && SPECIES[sp] ? sp : ''
+    if (key === me.mountKey) return
+    me.mountKey = key
+    disposeModel(me.mount)
+    me.mount = null
+    if (key) {
+      me.mount = buildMount(key, false)
+      me.mount.rotation.y = this.heading
+      me.root.add(me.mount)
+    } else {
+      me.lift = 0
+      if (me.model) { me.model.position.set(0, 0, 0); seatPose(me.model, false) }
+    }
+    this.fol.setHidden(!!key)
   }
 
   // —— NPC ——
@@ -1302,12 +1438,27 @@ export class World3D {
       r.is3d = is3d
       r.tx = tx; r.tz = tz
       r.tRy = is3d && typeof s.ry === 'number' ? s.ry : DIR_RY[s.dir] ?? r.heading
-      if (Math.hypot(tx - r.pos.x, tz - r.pos.z) > 4) this.placeRemote(r, tx, tz, r.tRy)
+      // 骑乘（室外才骑）：坐骑模型随 state.mount 重建
+      const msp = s.mount && SPECIES[s.mount] && !this.map.interior ? s.mount : ''
+      if (msp !== r.mountKey) {
+        r.mountKey = msp
+        disposeModel(r.mount)
+        r.mount = null
+        r.lift = 0
+        if (msp) {
+          r.mount = buildMount(msp, true)
+          r.mount.rotation.y = r.heading
+          r.root.add(r.mount)
+        } else if (r.model) { r.model.position.set(0, 0, 0); seatPose(r.model, false) }
+        r.fol.setHidden(!!msp)
+      }
+      // 骑手移动更快，插值落后得更多：放宽“瞬移”阈值
+      if (Math.hypot(tx - r.pos.x, tz - r.pos.z) > (msp ? 7 : 4)) this.placeRemote(r, tx, tz, r.tRy)
       const lk = JSON.stringify(s.look || {})
       if (lk !== r.lookKey) {
         r.lookKey = lk
         disposeModel(r.model)
-        r.model = castShadows(buildTrainer(s.look || {}))
+        r.model = lightShadows(buildTrainer(s.look || {}))
         r.model.rotation.y = r.heading
         r.root.add(r.model)
       }
@@ -1324,7 +1475,8 @@ export class World3D {
     this.scene.add(root)
     const r = {
       cid: s.cid, state: s, root, proxy, model: null, lookKey: null, pos: root.position, heading: DIR_RY[s.dir] ?? 0,
-      tx: x, tz: z, tRy: 0, is3d: false, spd: 0, stamp: 0, fol: new Follower(this.scene), tag: new Tag(this.labels, ''),
+      tx: x, tz: z, tRy: 0, is3d: false, spd: 0, stamp: 0, fol: new Follower(this.scene, true), tag: new Tag(this.labels, ''),
+      mount: null, mountKey: '', lift: 0,
     }
     this.placeRemote(r, x, z, r.heading)
     this.remotes.set(s.cid, r)
@@ -1342,6 +1494,7 @@ export class World3D {
     const r = this.remotes.get(cid)
     if (!r) return
     disposeModel(r.model)
+    disposeModel(r.mount)
     r.root.removeFromParent()
     r.fol.dispose()
     r.tag.dispose()
@@ -1357,8 +1510,8 @@ export class World3D {
         const k = damp(10, dt)
         mx = dx * k; mz = dz * k
       } else if (d > 1e-3) {
-        // 2D 客户端只发整格坐标：按距离自适应速度，走路时连续不卡顿
-        const step = Math.min(d, clamp(d * 7, 3.2, 8.5) * dt)
+        // 2D 客户端只发整格坐标：按距离自适应速度，走路时连续不卡顿（骑乘最快约 14.9 格/秒）
+        const step = Math.min(d, clamp(d * 7, 3.2, r.mountKey ? 16 : 8.5) * dt)
         mx = dx / d * step; mz = dz / d * step
       }
       p.x += mx; p.z += mz
@@ -1369,7 +1522,12 @@ export class World3D {
       r.heading = lerpAngle(r.heading, want, damp(r.is3d ? 12 : 14, dt))
       if (r.model) {
         r.model.rotation.y = r.heading
-        r.model.userData.animate?.(t, { speed: moving ? Math.max(0.3, animSpeed(r.spd)) : 0 })
+        if (r.mount) {
+          r.model.userData.animate?.(t, { speed: 0 })
+          r.mount.userData.animate?.(t, { moving, speed: moving ? Math.max(0.3, Math.min(1, r.spd / (RUN * RIDE_MUL))) : 0 })
+          seatPose(r.model, true)
+          r.lift = placeRider(r.model, r.mount, r.heading)
+        } else r.model.userData.animate?.(t, { speed: moving ? Math.max(0.3, animSpeed(r.spd)) : 0 })
       }
       r.fol.update(dt, t, p.x, p.z)
     }
@@ -1419,7 +1577,7 @@ export class World3D {
 
   addWild(w, t) {
     const root = new THREE.Group()
-    const model = castShadows(buildCreature(w.sp, { shiny: !!w.shiny }))
+    const model = lightShadows(buildCreature(w.sp, { shiny: !!w.shiny }))
     model.scale.setScalar(0.01)
     root.add(model)
     const h = (model.userData.height || 1) * WILD_SCALE
@@ -1462,7 +1620,7 @@ export class World3D {
     const root = new THREE.Group()
     root.position.set(s.x + 0.5, 0, s.y + 0.5)
     const sc = s.sp === 'thundrake' ? 1.2 : 0.95
-    const model = castShadows(buildCreature(s.sp, { shiny: !!s.shiny }))
+    const model = lightShadows(buildCreature(s.sp, { shiny: !!s.shiny }), 4)
     model.scale.setScalar(sc)
     const h = (model.userData.height || 1) * sc
     const glow = new THREE.Mesh(GLOW_GEO, GLOW_MAT)
@@ -1508,7 +1666,7 @@ export class World3D {
   updateLabels(now) {
     const pos = this.pos, g = this.g, mapId = this.map.id
     const me = this.me.tag
-    me.obj.position.set(pos.x, 1.42, pos.z)
+    me.obj.position.set(pos.x, TAG_Y + this.me.lift, pos.z)
     const mb = g.bubbles?.get(g.signer?.pubkey)
     me.setBubble(mb && now - mb.t < 7000 && mb.map === mapId ? mb : null)
     const me2 = g.net ? g.emotes?.get(g.net.cid) : null
@@ -1518,13 +1676,49 @@ export class World3D {
       const hidden = this.isFar(r.pos.x, r.pos.z)
       tag.obj.visible = !hidden
       if (hidden) continue
-      tag.obj.position.set(r.pos.x, 1.42, r.pos.z)
+      tag.obj.position.set(r.pos.x, TAG_Y + r.lift, r.pos.z)
+      // 和自己站在同一处的玩家：名字淡出，避免两个标签叠在一个身体上
+      tag.setDim(Math.hypot(r.pos.x - pos.x, r.pos.z - pos.z) < 0.6)
       const b = g.bubbles?.get(r.state.pk)
       tag.setBubble(b && now - b.t < 7000 && b.map === mapId ? b : null)
       const e = g.emotes?.get(r.cid)
       tag.setEmote(e && now - e.t < 2500 ? e : null)
     }
     for (const o of this.entry.bld) o.visible = !this.isFar(o.position.x, o.position.z)
+    this.declutter()
+  }
+
+  // 建筑招牌 / NPC 名字压在自己身上或自己的名字上时淡出（CSS2D 标签没有深度遮挡）
+  declutter() {
+    const W = innerWidth, H = innerHeight, pos = this.pos, cam = this.camera
+    const toScreen = (x, y, z, out) => {
+      _v1.set(x, y, z).project(cam)
+      out.x = (_v1.x * 0.5 + 0.5) * W
+      out.y = (-_v1.y * 0.5 + 0.5) * H
+      return _v1.z < 1
+    }
+    const top = _s1, feet = _s2, a = _s3
+    toScreen(pos.x, TAG_Y + this.me.lift, pos.z, top)
+    toScreen(pos.x, 0, pos.z, feet)
+    const nameEl = this.me.tag.name
+    if (!this.meTagW) this.meTagW = nameEl.offsetWidth || 90
+    const half = Math.max(this.meTagW / 2, (feet.y - top.y) * 0.4) + 6
+    const x0 = top.x - half, x1 = top.x + half, y0 = top.y - 30, y1 = feet.y
+    const test = (o, w, h) => {
+      if (!o.visible) return false
+      if (!toScreen(o.position.x, o.position.y, o.position.z, a)) return false
+      return a.x + w / 2 > x0 && a.x - w / 2 < x1 && a.y > y0 && a.y - h < y1
+    }
+    for (const o of this.entry.bld) {
+      const e = o.element
+      if (!o.userData.w && o.visible) o.userData.w = e.offsetWidth
+      const d = test(o, o.userData.w || 80, 24)
+      if (d !== !!o.userData.dim) { o.userData.dim = d; e.classList.toggle('w3d-dim', d) }
+    }
+    for (const n of this.entry.npcs) {
+      const d = test(n.label, n.near ? 90 : 24, n.alertOn ? 44 : 22)
+      if (d !== !!n.dim) { n.dim = d; n.box.classList.toggle('w3d-dim', d) }
+    }
   }
 
   isFar(x, z) {
@@ -1562,10 +1756,56 @@ export class World3D {
     const h = Math.cos(this.pitch) * this.dist
     cam.position.set(this.focus.x + Math.sin(this.yaw) * h, this.focus.y + Math.sin(this.pitch) * this.dist, this.focus.z + Math.cos(this.yaw) * h)
     cam.lookAt(this.focus)
+    this.updateViewOffset(dt, snap)
     this.sky.position.copy(cam.position)
     const A = this.atm || DAY
     this.scene.fog.near = this.dist + A.fogNear
     this.scene.fog.far = this.dist + A.fogFar
+  }
+
+  // 遮挡镂空：把玩家在屏幕上的位置 / 半径、以及玩家所在的竖直平面写给树和房屋的材质（materials.js OCCLUDE）
+  updateOcclusion() {
+    const cam = this.camera, occR = OCCLUDE.occR.value
+    if (this.map.interior) { occR.set(0, 0); return }
+    cam.updateMatrixWorld()
+    const lift = this.me.lift, pos = this.pos
+    const c = _v1.set(pos.x, 0.62 + lift * 0.8, pos.z)
+    const d = cam.position.distanceTo(c)
+    const hx = cam.position.x - pos.x, hz = cam.position.z - pos.z, hl = Math.hypot(hx, hz) || 1
+    OCCLUDE.occPlane.value.set(pos.x, pos.z, hx / hl, hz / hl)
+    c.project(cam)
+    const size = this.renderer.getDrawingBufferSize(_db)
+    const ppu = size.y / (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * d) * cam.zoom
+    const k = lift > 0 ? 1.2 : 1
+    OCCLUDE.occC.value.set((c.x * 0.5 + 0.5) * size.x, (c.y * 0.5 + 0.5) * size.y)
+    occR.set(ppu * 0.95 * k, ppu * 1.25 * k)
+  }
+
+  // 聊天面板展开并盖住玩家时（竖屏手机），把画面整体上移，让玩家露在面板上方
+  updateViewOffset(dt, snap) {
+    const cam = this.camera, W = innerWidth, H = innerHeight
+    const pnow = performance.now()
+    if (pnow >= this.nextChatCheck) {
+      this.nextChatCheck = pnow + 250
+      const chat = document.getElementById('chat')
+      const r = chat && !chat.classList.contains('collapsed') && chat.offsetParent ? document.getElementById('chat-body')?.getBoundingClientRect() : null
+      this.chatRect = r && r.height > 0 ? { l: r.left, r: r.right, t: r.top } : null
+    }
+    let want = 0
+    const cr = this.chatRect
+    if (cr) {
+      // 不含偏移时玩家脚下 / 头顶的屏幕位置
+      cam.updateMatrixWorld()
+      _v1.set(this.pos.x, 0, this.pos.z).project(cam)
+      const fx = (_v1.x * 0.5 + 0.5) * W, fy = (-_v1.y * 0.5 + 0.5) * H + this.viewDy
+      if (fx > cr.l - 30 && fx < cr.r + 30 && fy > cr.t - 24) want = Math.min(H * 0.3, fy - cr.t + 24)
+    }
+    let dy = snap ? want : this.viewDy + (want - this.viewDy) * damp(6, dt)
+    if (want === 0 && dy < 0.5) dy = 0
+    if (dy === this.viewDy || (dy && Math.abs(dy - this.viewDy) < 0.05)) return
+    this.viewDy = dy
+    if (dy) cam.setViewOffset(W, H, 0, dy, W, H)
+    else cam.clearViewOffset()
   }
 
   updateLights(dt, t) {
@@ -1602,7 +1842,9 @@ export class World3D {
     this.camera.aspect = a
     // 竖屏手机加大垂直视角，横向视野不至于太窄
     this.camera.fov = a >= 1 ? 42 : Math.min(62, 42 / Math.pow(a, 0.45))
+    if (this.viewDy) this.camera.setViewOffset(w, h, 0, this.viewDy, w, h)
     this.camera.updateProjectionMatrix()
+    this.meTagW = 0
     U_PX.value = (h * pr) / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2))
   }
 }

@@ -3,7 +3,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { tileAt } from '../data/maps.js'
-import { toonMat, addOutline, gradientMap, disposeTree, shade } from './materials.js'
+import { toonMat, addOutline, gradientMap, disposeTree, shade, occluderMat } from './materials.js'
 
 const S = 4 // 地面网格每图块细分
 const M = 6 // 地图外的过渡边距（图块）
@@ -210,8 +210,10 @@ export function buildTerrain(map) {
   group.name = 'terrain'
   const prim = primitives()
   const vcMat = toonMat(0xffffff, { vertexColors: true })
+  // 高大的遮挡物（近处树木、房屋）用带"遮挡镂空"的副本，挡住玩家时局部透出（World3D 每帧更新）
+  const occMat = occluderMat(vcMat)
   const labelAnchors = []
-  const ctx = { map, dark, pal, prim, U, group, vcMat }
+  const ctx = { map, dark, pal, prim, U, group, vcMat, occMat }
 
   // 建筑占地（地面 AO、草簇排除）
   const bmask = new Uint8Array(map.w * map.h)
@@ -767,10 +769,10 @@ function buildTrees(ctx) {
   }
   for (let v = 0; v < 3; v++) {
     if (near[v].length) {
-      const m = makeInstanced(treeGeo(ctx, v, false), ctx.vcMat, near[v], nearC[v])
+      const m = makeInstanced(treeGeo(ctx, v, false), ctx.occMat, near[v], nearC[v])
       m.name = 'trees' + v
       ctx.add(m, { cast: true, receive: true })
-      addOutline(m, 0.03)
+      addOutline(m, 0.03, { occlude: true })
     }
     if (far[v].length) {
       const m = makeInstanced(treeGeo(ctx, v, true), ctx.vcMat, far[v], farC[v])
@@ -996,14 +998,14 @@ function buildBuildings(ctx, anchors) {
     anchors.push({ x: cx, y: ridgeY + 0.6, z: zc, text: b.label, kind: 'building' })
   }
 
-  const shellMesh = new THREE.Mesh(shell.build(), ctx.vcMat)
+  const shellMesh = new THREE.Mesh(shell.build(), ctx.occMat)
   shellMesh.name = 'buildings'
   ctx.add(shellMesh, { cast: true, receive: true })
-  addOutline(shellMesh, 0.035)
-  const detailMesh = new THREE.Mesh(detail.build(), ctx.vcMat)
+  addOutline(shellMesh, 0.035, { occlude: true })
+  const detailMesh = new THREE.Mesh(detail.build(), ctx.occMat)
   detailMesh.name = 'buildingDetails'
   ctx.add(detailMesh, { cast: true, receive: true })
-  const glassMesh = new THREE.Mesh(glass.build(), toonMat('#9fdcff', { emissive: 0x1d4a66 }))
+  const glassMesh = new THREE.Mesh(glass.build(), occluderMat(toonMat('#9fdcff', { emissive: 0x1d4a66 })))
   glassMesh.name = 'glass'
   ctx.add(glassMesh, { receive: true })
 }

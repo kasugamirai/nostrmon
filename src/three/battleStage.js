@@ -1101,8 +1101,10 @@ export class BattleStage {
     const hf = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(19)) * 1.6)
     this.camera.fov = clamp(THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(hf / 2) / aspect)), 38, 62)
     this.camera.updateProjectionMatrix()
-    this.basePos.set(1.3 - port * 0.5, 2.75 + port * 0.35, 8.3 - port * 0.6)
-    this.baseLook.set(0.45 - port * 0.6, 0.95 + port * 0.05, -1.6)
+    // 我方精灵在画面左下且离镜头近：镜头略微后拉、注视点偏左，尾巴不出画；
+    // 竖屏视野横向很窄，再后拉并抬高、注视点移到双方中间（375×812 时双方都在 NDC ±0.85 内）
+    this.basePos.set(0.9 - port * 0.9, 2.85 + port * 0.45, 9.3 + port * 1.0)
+    this.baseLook.set(0.1 - port * 0.8, 0.95, -1.6)
     const px = h * this.renderer.getPixelRatio() * 0.5
     this.glow.mat.uniforms.uPx.value = px
     this.solid.mat.uniforms.uPx.value = px

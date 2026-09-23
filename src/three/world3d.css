@@ -63,6 +63,10 @@
   animation: w3d-glow 1.6s ease-in-out infinite;
 }
 
+/* 与自己重叠的招牌 / NPC 名字 / 同格玩家名字淡出（world3d.js declutter） */
+.w3d-bld, .w3d-npc, .w3d-name { transition: opacity 0.18s; }
+.w3d-dim { opacity: 0.12; }
+
 /* —— 传送转场 —— */
 .w3d-fade { position: absolute; inset: 0; z-index: 4; background: #0d0c18; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
 .w3d-fade.on { opacity: 1; }
@@ -70,6 +74,11 @@
 @keyframes w3d-pop { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes w3d-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @keyframes w3d-glow { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 6px rgba(255, 214, 90, 0.9)); } }
+
+/* 手机竖屏：地图名横幅放到右上角 HUD 堆叠（最多三行）下方，不压住金币 / 地图按钮（只影响 3D 版） */
+@media (max-width: 640px) {
+  #app #map-banner { top: calc(152px + var(--safe-t)); }
+}
 
 @media (max-width: 520px) {
   .w3d-name { font-size: 11px; }
