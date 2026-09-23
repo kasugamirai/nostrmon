@@ -1,0 +1,83 @@
+/* 3D 大地图：画布、标签层（CSS2D）与转场遮罩。标签层 z-index 3，始终低于 HUD（5+） */
+#world { image-rendering: auto; touch-action: none; cursor: grab; -webkit-tap-highlight-color: transparent; }
+#world.w3d-drag { cursor: grabbing; }
+
+.w3d-labels { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; overflow: hidden; contain: layout style; }
+.w3d-labels > div { pointer-events: none; will-change: transform; }
+
+/* —— 训练家：名字 + 表情 + 聊天气泡（自下而上堆叠） —— */
+.w3d-tag { display: flex; flex-direction: column; align-items: center; gap: 4px; padding-bottom: 2px; }
+.w3d-name {
+  font: 600 12px/1 var(--body); color: #fff; white-space: nowrap; letter-spacing: 0.02em;
+  background: rgba(28, 26, 46, 0.8); padding: 4px 9px 5px; border-radius: 999px;
+  box-shadow: 0 2px 0 rgba(28, 26, 46, 0.3);
+}
+.w3d-name.me { background: var(--gold); color: var(--ink); box-shadow: 0 0 0 2px var(--ink), 0 3px 0 2px var(--ink); padding: 3px 9px 4px; }
+.w3d-name.busy::after { content: ' ⚔'; color: var(--gold); }
+.w3d-name.me.busy::after { color: var(--coral); }
+
+.w3d-bubble {
+  position: relative; max-width: 180px; margin-bottom: 6px;
+  background: #fff; color: var(--ink); border: 2px solid var(--ink); border-radius: 10px;
+  padding: 5px 10px; box-shadow: 0 3px 0 rgba(28, 26, 46, 0.25);
+  transform-origin: 50% 100%;
+}
+.w3d-bubble::after {
+  content: ''; position: absolute; left: 50%; bottom: -7px; width: 10px; height: 10px; margin-left: -5px;
+  background: #fff; border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); transform: rotate(45deg);
+}
+.w3d-btext {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  font: 500 13px/1.35 var(--body); text-align: center; word-break: break-all; position: relative; z-index: 1;
+}
+.w3d-emote { font-size: 30px; line-height: 1; filter: drop-shadow(0 2px 0 rgba(28, 26, 46, 0.35)); transform-origin: 50% 100%; }
+.w3d-pop { animation: w3d-pop 0.34s cubic-bezier(0.3, 1.6, 0.5, 1); }
+
+/* —— NPC：“！”与靠近时出现的名字 —— */
+.w3d-npc { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.w3d-npc-name {
+  font: 600 11px/1 var(--body); color: #fff; white-space: nowrap; background: rgba(28, 26, 46, 0.72);
+  padding: 3px 8px 4px; border-radius: 999px; opacity: 0; transform: translateY(4px); transition: opacity 0.2s, transform 0.2s;
+}
+.w3d-npc.near .w3d-npc-name { opacity: 1; transform: none; }
+.w3d-alert {
+  font: 700 26px/1 var(--mono); color: var(--gold); -webkit-text-stroke: 2px var(--ink); paint-order: stroke fill;
+  text-shadow: 0 3px 0 var(--ink); animation: w3d-bob 0.9s ease-in-out infinite;
+}
+
+/* —— 建筑招牌 —— */
+.w3d-bld {
+  font: 700 12px/1 var(--body); color: #fff; white-space: nowrap; letter-spacing: 0.06em;
+  background: rgba(28, 26, 46, 0.8); padding: 4px 10px 5px; border-radius: 6px; box-shadow: 0 2px 0 rgba(28, 26, 46, 0.35);
+}
+
+/* —— 野生精灵 / 稀有精灵 —— */
+.w3d-wild {
+  font: 600 11px/1 var(--body); color: #fff; white-space: nowrap; background: rgba(28, 26, 46, 0.66);
+  padding: 3px 8px 4px; border-radius: 999px;
+}
+.w3d-wild.fight { background: var(--coral); box-shadow: 0 0 0 2px var(--ink); font-weight: 700; }
+.w3d-rare {
+  font: 700 12px/1 var(--body); color: var(--ink); white-space: nowrap; background: var(--gold);
+  padding: 3px 9px 4px; border-radius: 999px; box-shadow: 0 0 0 2px var(--ink), 0 3px 0 2px var(--ink);
+  animation: w3d-glow 1.6s ease-in-out infinite;
+}
+
+/* —— 传送转场 —— */
+.w3d-fade { position: absolute; inset: 0; z-index: 4; background: #0d0c18; opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+.w3d-fade.on { opacity: 1; }
+
+@keyframes w3d-pop { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes w3d-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes w3d-glow { 0%, 100% { filter: none; } 50% { filter: drop-shadow(0 0 6px rgba(255, 214, 90, 0.9)); } }
+
+@media (max-width: 520px) {
+  .w3d-name { font-size: 11px; }
+  .w3d-bubble { max-width: 150px; }
+  .w3d-btext { font-size: 12px; }
+  .w3d-emote { font-size: 26px; }
+  .w3d-bld { font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .w3d-alert, .w3d-rare, .w3d-pop { animation: none; }
+}
