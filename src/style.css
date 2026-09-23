@@ -258,17 +258,39 @@ button.moncard:hover { background: var(--paper-2); }
 .b-slot.foe { right: calc(8% + min(300px, 38vw) / 2 - min(96px, 14vw)); top: calc(36% - min(172px, 26vw)); width: min(192px, 28vw); height: min(192px, 28vw); }
 .b-slot.me { left: calc(5% + min(360px, 46vw) / 2 - min(120px, 17vw)); bottom: calc(6% + min(20px, 3vw)); width: min(240px, 34vw); height: min(240px, 34vw); }
 .b-mon { width: 100%; height: 100%; image-rendering: pixelated; transition: transform 0.25s, opacity 0.25s, filter 0.2s; }
+.b-mon.enter { animation: enter 0.4s ease; }
 .b-mon.hit { animation: hit 0.45s steps(2) 1; }
 .b-mon.faint { transform: translateY(40%) scaleY(0.2); opacity: 0; transition: transform 0.5s ease-in, opacity 0.5s; }
 .b-mon.gone { opacity: 0; transform: scale(0.2); }
 .b-mon.lunge-me { animation: lungeMe 0.3s ease; }
 .b-mon.lunge-foe { animation: lungeFoe 0.3s ease; }
-.b-mon.enter { animation: enter 0.4s ease; }
+.b-mon.cast { animation: cast 0.35s ease; }
+.b-mon.dodge-me { animation: dodgeMe 0.42s ease; }
+.b-mon.dodge-foe { animation: dodgeFoe 0.42s ease; }
 .b-mon.glow { filter: brightness(1.8) saturate(0.4); }
 @keyframes hit { 0%, 100% { opacity: 1; } 50% { opacity: 0.1; } }
 @keyframes lungeMe { 50% { transform: translate(18%, -8%); } }
 @keyframes lungeFoe { 50% { transform: translate(-18%, 8%); } }
 @keyframes enter { from { transform: scale(0.2); opacity: 0; filter: brightness(3); } }
+@keyframes cast { 45% { transform: scale(1.08); filter: brightness(1.7) drop-shadow(0 0 6px #fff); } }
+@keyframes dodgeMe { 45% { transform: translateX(-18%); } }
+@keyframes dodgeFoe { 45% { transform: translateX(18%); } }
+.b-fx2d { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; }
+#b-scene > .b-info { z-index: 3; }
+#b-scene.shake { animation: sceneShake 0.38s linear; }
+#b-scene.shake-big { animation: sceneShake 0.5s linear; --shk: 11px; }
+@keyframes sceneShake { 10%, 50%, 90% { transform: translate(calc(var(--shk, 6px) * -1), 2px); } 30%, 70% { transform: translate(var(--shk, 6px), -2px); } }
+.dmg-num {
+  position: absolute; z-index: 4; transform: translate(-50%, -50%); pointer-events: none; text-align: center; line-height: 1;
+  font: 700 30px var(--mono); color: #fff; animation: dmgUp 1s ease-out forwards;
+  text-shadow: 3px 0 var(--ink), -3px 0 var(--ink), 0 3px var(--ink), 0 -3px var(--ink), 2px 2px var(--ink), -2px -2px var(--ink), 2px -2px var(--ink), -2px 2px var(--ink);
+}
+.dmg-num small { display: block; margin-top: 4px; font: 700 13px var(--body); letter-spacing: 0.1em; }
+.dmg-num.crit { font-size: 40px; color: var(--gold); }
+.dmg-num.super { font-size: 36px; color: #ffb347; }
+.dmg-num.weak { font-size: 22px; color: #c9cfdb; }
+.dmg-num.miss { font-size: 24px; color: #dfe6ef; }
+@keyframes dmgUp { 0% { opacity: 0; transform: translate(-50%, -30%) scale(0.5); } 15% { opacity: 1; transform: translate(-50%, -70%) scale(1.2); } 30% { transform: translate(-50%, -80%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -170%) scale(1); } }
 
 .b-info {
   position: absolute; background: var(--paper); border: 3px solid var(--ink); border-radius: 12px; box-shadow: 0 4px 0 var(--ink);
@@ -306,6 +328,19 @@ button.moncard:hover { background: var(--paper-2); }
   .b-info.me { bottom: 4%; }
 }
 
+/* —— 坐骑按钮 —— */
+#ride-btn {
+  position: absolute; right: 12px; bottom: calc(84px + var(--safe-b)); z-index: 5;
+  display: flex; align-items: center; gap: 4px; padding: 2px 10px 2px 4px;
+  background: var(--paper); border: 2.5px solid var(--ink); border-radius: 12px; box-shadow: 0 3px 0 var(--ink);
+  font-family: var(--display); font-size: 15px;
+}
+#ride-btn canvas { width: 36px; height: 36px; image-rendering: pixelated; }
+#ride-btn.on { background: var(--gold); }
+#ride-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+@media (pointer: coarse) { #ride-btn { bottom: auto; top: calc(96px + var(--safe-t)); } }
+.mountcard { background: #fffaf0; }
+
 /* —— 世界地图 / 传送 —— */
 .wmap { position: relative; width: 100%; max-width: 420px; margin: 8px auto 10px; border: 3px solid var(--ink); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 0 var(--ink); }
 .wmap-cv { display: block; width: 100%; height: auto; }
@@ -335,5 +370,6 @@ button.moncard:hover { background: var(--paper-2); }
 #load-steps li.fail::before { content: '× '; color: var(--coral); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  #b-scene.shake, #b-scene.shake-big { animation: none; }
+  .toast, #map-banner, #dialog .caret, .wpin.spawn, .wpin.me i { animation: none !important; transition: none !important; }
 }

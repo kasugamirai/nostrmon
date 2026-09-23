@@ -6,6 +6,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { MAPS, tileAt } from '../data/maps.js'
 import { SPECIES } from '../data/species.js'
 import { buildTerrain } from './terrain.js'
+import { buildInterior } from './interior.js'
 import { buildTrainer, buildCreature } from './models.js'
 import { toonMat, addOutline } from './materials.js'
 import './world3d.css'
@@ -16,6 +17,7 @@ const KEYMAP = { ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', Arr
 const DIR_RY = { down: 0, up: Math.PI, right: Math.PI / 2, left: -Math.PI / 2 }
 const LABEL_FAR2 = 18 * 18
 const FOLLOW_GAP = 1.1
+const WILD_SCALE = 0.88
 const REACH = [0.55, 0.95]
 const AXES = ['x', 'y', 'z']
 const SHADOW_HALF = 14, SHADOW_RES = 2048
@@ -32,6 +34,14 @@ const NIGHT = {
   fog: '#15253a', fogNear: 3, fogFar: 26, skyTop: '#050b1e', skyHorizon: '#1a2f4d', cloud: '#2d4166', clouds: 0.45, stars: 1,
   lantern: 7,
 }
+// 室内：没有天空和雾，暖色环境光 + 从前上方照进来的"窗光"，阴影短
+const INDOOR = {
+  hemiSky: '#fff3e0', hemiGround: '#7a5a3e', hemiI: 1.75, sun: '#fff1da', sunI: 1.55,
+  fog: '#15131f', fogNear: 300, fogFar: 600, skyTop: '#15131f', skyHorizon: '#15131f', cloud: '#15131f', clouds: 0, stars: 0,
+  lantern: 0, indoor: true,
+}
+const SUN_IN = new THREE.Vector3(-2.5, 12, 7)
+const ROOM_LIGHTS = 2
 
 // —— 小工具 ——
 const wrapAngle = (a) => a - TAU * Math.floor((a + Math.PI) / TAU)
@@ -298,8 +308,12 @@ class Follower {
     this.parent.add(this.model)
   }
   reset(x, z, ry, free) {
-    let bx = x - Math.sin(ry) * FOLLOW_GAP, bz = z - Math.cos(ry) * FOLLOW_GAP
-    if (free && !free(bx, bz)) { bx = x; bz = z }
+    // 优先站在身后；身后是墙 / 门时依次试左右两侧和前方
+    let bx = x, bz = z
+    for (const a of [0, Math.PI / 2, -Math.PI / 2, Math.PI]) {
+      const cx = x - Math.sin(ry + a) * FOLLOW_GAP, cz = z - Math.cos(ry + a) * FOLLOW_GAP
+      if (!free || free(cx, cz)) { bx = cx; bz = cz; break }
+    }
     this.trail.reset(bx, bz)
     this.trail.push(x, z)
     this.pos.set(bx, 0, bz)
@@ -421,8 +435,8 @@ export class World3D {
 
     // 镜头
     this.yaw = this.yawT = 0
-    this.pitch = this.pitchT = 0.9
-    this.dist = this.distT = 9
+    this.pitch = this.pitchT = 0.8
+    this.dist = this.distT = 10.5
     this.focus = new THREE.Vector3()
     this.focusVel = new THREE.Vector3()
 
@@ -450,6 +464,15 @@ export class World3D {
     // 灯笼光常驻（白天强度 0），避免切图时灯光数量变化导致着色器重编译
     this.lamp = new THREE.PointLight('#ffb866', 0, 9, 1.4)
     this.scene.add(this.hemi, this.sun, this.sun.target, this.lamp)
+    // 室内灯（落地灯 / 壁炉）的固定灯池：数量恒定，切图不触发着色器重编译
+    this.roomLights = []
+    for (let i = 0; i < ROOM_LIGHTS; i++) {
+      const L = new THREE.PointLight('#ffc27a', 0, 6, 1.4)
+      L.userData = { base: 0, flicker: false }
+      this.roomLights.push(L)
+      this.scene.add(L)
+    }
+    this.camOut = null
     this.lantern = this.makeLantern()
     this.scene.add(this.lantern)
     this.fireflies = new Map()
@@ -523,7 +546,7 @@ export class World3D {
   entryFor(map) {
     let e = this.maps.get(map.id)
     if (e) return e
-    const terrain = buildTerrain(map)
+    const terrain = map.interior ? buildInterior(map) : buildTerrain(map)
     const npcRoot = new THREE.Group()
     const labelRoot = new THREE.Group()
     const npcs = map.npcs.map((npc) => {
@@ -588,8 +611,25 @@ export class World3D {
   }
 
   applyAtmosphere(map) {
-    const A = map.dark ? NIGHT : DAY
+    const A = map.interior ? { ...INDOOR, fog: map.bg || INDOOR.fog } : map.dark ? NIGHT : DAY
     this.atm = A
+    this.sky.visible = !A.indoor
+    const rl = this.entry?.terrain.lights || []
+    this.roomLights.forEach((L, i) => {
+      const d = rl[i]
+      L.userData.base = d ? d.intensity : 0
+      L.userData.flicker = !!d?.flicker
+      L.intensity = L.userData.base
+      if (d) { L.position.set(d.x, d.y, d.z); L.color.set(d.color); L.distance = d.distance || 6 }
+    })
+    // 室内镜头更近、更俯视；出门时恢复室外的镜头设置
+    if (A.indoor && !this.camOut) {
+      this.camOut = { dist: this.distT, pitch: this.pitchT, yaw: this.yawT }
+      this.distT = 9.6; this.pitchT = 0.96; this.yawT = 0; this.yaw = wrapAngle(this.yaw)
+    } else if (!A.indoor && this.camOut) {
+      this.distT = this.camOut.dist; this.pitchT = this.camOut.pitch; this.yawT = this.camOut.yaw
+      this.camOut = null
+    }
     this.hemi.color.set(A.hemiSky)
     this.hemi.groundColor.set(A.hemiGround)
     this.hemi.intensity = A.hemiI
@@ -732,7 +772,7 @@ export class World3D {
     }
     if (bb) {
       const [dx, dy] = bb.door
-      return this.goTo(dx, dy + 1, { fx: dx + 0.5, fz: dy + 1.5, range: 0.45, act: () => { this.faceTo(dx + 0.5, dy + 0.5); this.g.enterBuilding(bb) } })
+      return this.goTo(dx, dy + 1, { fx: dx + 0.5, fz: dy + 1.5, range: 0.45, act: () => { this.faceTo(dx + 0.5, dy + 0.5); this.enterDoor(bb) } })
     }
     if (!gp) return
     const x = clamp(gp.x, 0.3, this.map.w - 0.3), z = clamp(gp.z, 0.3, this.map.h - 0.3)
@@ -752,8 +792,12 @@ export class World3D {
     } else if (kind === 'npc') {
       const fx = ref.x + 0.5, fz = ref.y + 0.5
       const talk = () => { this.faceTo(fx, fz); this.g.talkNpc(ref) }
+      const front = this.counterFront(ref)
       if (Math.hypot(fx - pos.x, fz - pos.z) < 1.3) talk()
-      else this.goTo(ref.x, ref.y, { adjacent: true, fx, fz, range: 1.25, act: talk })
+      else if (front) {
+        if (front.x === this.p.x && front.y === this.p.y) talk()
+        else this.goTo(front.x, front.y, { fx: front.x + 0.5, fz: front.y + 0.5, range: 0.3, act: talk })
+      } else this.goTo(ref.x, ref.y, { adjacent: true, fx, fz, range: 1.25, act: talk })
     } else if (kind === 'wild') {
       const o = this.wilds.get(ref)
       if (o) this.path = { pts: [o.x, o.z], i: 0, fx: o.x, fz: o.z, range: 0, act: null, chase: ref }
@@ -1061,7 +1105,39 @@ export class World3D {
     this.doorAt = pnow
     this.clearInput()
     this.vel.set(0, 0)
-    this.g.enterBuilding(b)
+    this.enterDoor(b)
+  }
+
+  // 进门：有室内地图时先淡出再切换（与出门的地垫传送一致）
+  enterDoor(b) {
+    const inside = b.interior && MAPS[b.interior]
+    if (!inside) return this.g.enterBuilding(b)
+    if (this.fading) return
+    this.fading = true
+    this.clearInput()
+    this.vel.set(0, 0)
+    this.faceTo(b.door[0] + 0.5, b.door[1] + 0.5)
+    this.fadeEl.classList.add('on')
+    setTimeout(() => {
+      Promise.resolve().then(() => this.g.enterBuilding(b)).catch((e) => console.error(e)).finally(() => {
+        requestAnimationFrame(() => {
+          this.fadeEl.classList.remove('on')
+          setTimeout(() => { this.fading = false }, 150)
+        })
+      })
+    }, 260)
+  }
+
+  // NPC 站在柜台后面时，返回柜台前可以站的格子
+  counterFront(npc) {
+    let best = null, bd = Infinity
+    for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const cx = npc.x + dx, cy = npc.y + dy, fx = npc.x + 2 * dx, fy = npc.y + 2 * dy
+      if (tileAt(this.map, cx, cy) !== 'C' || this.blocked(fx, fy)) continue
+      const d = Math.hypot(fx + 0.5 - this.pos.x, fy + 0.5 - this.pos.z)
+      if (d < bd) { bd = d; best = { x: fx, y: fy } }
+    }
+    return best
   }
 
   faceTo(x, z) {
@@ -1101,13 +1177,21 @@ export class World3D {
       this.faceTo(best.npc.x + 0.5, best.npc.y + 0.5)
       return this.g.talkNpc(best.npc)
     }
+    // 1b. 隔着柜台的 NPC（护士、店员）：面前是柜台就和柜台另一侧的人说话
+    for (const reach of REACH) {
+      const tx = Math.floor(pos.x + fx * reach), ty = Math.floor(pos.z + fz * reach)
+      if (tileAt(this.map, tx, ty) !== 'C') continue
+      const d = this.p.dir, sx = d === 'right' ? 1 : d === 'left' ? -1 : 0, sy = d === 'down' ? 1 : d === 'up' ? -1 : 0
+      const a = this.entry.npcs.find((a) => a.npc.x === tx + sx && a.npc.y === ty + sy)
+      if (a) { this.faceTo(a.npc.x + 0.5, a.npc.y + 0.5); return this.g.talkNpc(a.npc) }
+    }
     // 2 / 3. 面前的告示牌、门
     for (const reach of REACH) {
       const tx = Math.floor(pos.x + fx * reach), ty = Math.floor(pos.z + fz * reach)
       const sign = this.map.signs[`${tx},${ty}`]
       if (sign) return this.g.say([sign])
       const b = this.map.buildings.find((b) => b.door[0] === tx && b.door[1] === ty)
-      if (b) return this.g.enterBuilding(b)
+      if (b) return this.enterDoor(b)
     }
     // 4. 身边的其他玩家
     let rb = null
@@ -1310,8 +1394,8 @@ export class World3D {
       o.heading = lerpAngle(o.heading, w.heading || 0, k)
       o.model.rotation.y = o.heading
       const bt = t - o.born
-      if (bt < 0.45) o.model.scale.setScalar(0.75 * Math.max(0.01, easeOutBack(bt / 0.45)))
-      else if (!o.grown) { o.grown = true; o.model.scale.setScalar(0.75) }
+      if (bt < 0.45) o.model.scale.setScalar(WILD_SCALE * Math.max(0.01, easeOutBack(bt / 0.45)))
+      else if (!o.grown) { o.grown = true; o.model.scale.setScalar(WILD_SCALE) }
       o.model.userData.animate?.(t, { moving: !!w.moving, speed: w.moving ? 0.5 : 0 })
 
       const other = !!w.battlingBy && w.id !== this.engagingId
@@ -1338,7 +1422,7 @@ export class World3D {
     const model = castShadows(buildCreature(w.sp, { shiny: !!w.shiny }))
     model.scale.setScalar(0.01)
     root.add(model)
-    const h = (model.userData.height || 1) * 0.75
+    const h = (model.userData.height || 1) * WILD_SCALE
     const proxy = pickProxy('wild', w.id, 1, Math.max(0.6, h / 1.4))
     root.add(proxy)
     let spark = null
@@ -1452,11 +1536,27 @@ export class World3D {
   updateCamera(dt, snap) {
     const pos = this.pos, cam = this.camera
     if (this.rotKey) this.yawT += this.rotKey * 2.2 * dt
+    const indoor = !!this.map?.interior
+    if (indoor) {
+      this.yawT = clamp(this.yawT, -0.55, 0.55)
+      this.pitchT = clamp(this.pitchT, 0.7, 1.3)
+      this.distT = clamp(this.distT, 5, 12)
+    }
     const k = snap ? 1 : damp(12, dt)
     this.yaw += (this.yawT - this.yaw) * k
     this.pitch += (this.pitchT - this.pitch) * k
     this.dist += (this.distT - this.dist) * (snap ? 1 : damp(10, dt))
     _v3.set(pos.x + this.vel.x * 0.12, 0.85, pos.z + this.vel.y * 0.12)
+    if (indoor) {
+      // 房间保持在画面里：焦点限制在房间中部
+      const m = this.map, cx = m.w / 2, cz = (m.h + 2) / 2
+      // 可见半宽 / 半高随视口比例变化（竖屏手机上允许左右跟随）
+      const ht = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * this.dist
+      const kx = Math.max(0, m.w / 2 - Math.max(1.5, ht * cam.aspect - 0.6))
+      const kz = Math.max(0, (m.h - 2) / 2 - Math.max(1.5, ht * 0.75))
+      _v3.x = clamp(_v3.x, cx - kx, cx + kx)
+      _v3.z = clamp(_v3.z, cz - kz, cz + kz)
+    }
     if (snap) { this.focus.copy(_v3); this.focusVel.set(0, 0, 0) }
     else smoothDamp(this.focus, _v3, this.focusVel, 0.2, dt)
     const h = Math.cos(this.pitch) * this.dist
@@ -1472,8 +1572,13 @@ export class World3D {
     // 阴影相机跟随焦点，按阴影贴图像素对齐以减少闪烁
     const s = (SHADOW_HALF * 2) / SHADOW_RES
     const fx = Math.round(this.focus.x / s) * s, fz = Math.round(this.focus.z / s) * s
+    const so = this.atm?.indoor ? SUN_IN : SUN_OFFSET
     this.sun.target.position.set(fx, 0, fz)
-    this.sun.position.set(fx + SUN_OFFSET.x, SUN_OFFSET.y, fz + SUN_OFFSET.z)
+    this.sun.position.set(fx + so.x, so.y, fz + so.z)
+    for (let i = 0; i < this.roomLights.length; i++) {
+      const L = this.roomLights[i]
+      if (L.userData.flicker) L.intensity = L.userData.base * (0.8 + 0.2 * Math.sin(t * 11.3 + i) * Math.sin(t * 6.7))
+    }
     if (this.lantern.visible) {
       const L = this.lantern, pos = this.pos
       const side = this.heading + Math.PI * 0.72

@@ -84,6 +84,14 @@ NPCs may have `action: 'heal' | 'shop' | 'home'`; the core's `game.talkNpc` hand
 must be reachable: in `interact()`, if the tile in front of the player is a counter `C`, talk to an NPC on the tile beyond it;
 clicking such an NPC walks the player to the tile in front of the counter.
 
+## Mounts (added later)
+
+Every save owns a mount (`save.mount`, default `skyqilin`, an original legendary with `SPECIES[id].mount === true`).
+`game.isRiding()` is true when the player chose to ride and is outdoors (interiors force walking);
+`game.toggleRide()` flips it (R key, `#ride-btn`). Presence carries `mount: speciesId | null`.
+Riders move 1.75× faster; draw the trainer seated on the creature's back (creature scaled ~1.35 so it can carry a
+person), no follower while riding, name tag raised. Remote players with `state.mount` are drawn riding too.
+
 ## Shared core API (`game`, from `src/core/game.js`) available to World3D / controls / battle UI
 
 - `game.save` — `{ name, look, party: [{ uid, sp, lv, hp, shiny, nick, moves }], beaten: { npcId: true }, pos, ... }`

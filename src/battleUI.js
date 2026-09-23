@@ -5,6 +5,7 @@ import { SPECIES } from './data/species.js'
 import { TYPES } from './data/types.js'
 import { resolveTurn, requiredActors, isForcedTurn, activeMon, rngFor, BALLS, POTIONS } from './battle.js'
 import { monSprite, ballSprite } from './render/sprites.js'
+import { Fx2D, isContact } from './battleFx2d.js'
 import { sleep, escapeHtml } from './util.js'
 
 export const ITEMS = {
@@ -85,7 +86,7 @@ export class BattleUI {
 
   async anim(side, cls, ms) {
     const el = this.spriteEl(side)
-    el.classList.remove(cls)
+    el.classList.remove('enter', cls)
     void el.offsetWidth
     el.classList.add(cls)
     await sleep(ms)
@@ -192,18 +193,54 @@ export class BattleUI {
 
   close() { this.root.hidden = true; this.skip = null; this.stageExit() }
 
-  // —— 动画钩子（2D 实现）——
-  async stageEnter() { $('b-ball').hidden = true }
-  stageExit() {}
-  showMon(side, idx, anim) { this.setSprite(side, idx, anim) }
+  // —— 动画钩子（2D 实现：精灵图 CSS 动画 + battleFx2d 画布特效）——
+  get fx() { return this._fx || (this._fx = new Fx2D(this.scene)) }
+  fxAt(side) { return this.fx.at(this.spriteEl(side)) }
+
+  async stageEnter() { $('b-ball').hidden = true; this.fx.clear() }
+  stageExit() { this._fx?.clear() }
+  showMon(side, idx, anim) {
+    this.setSprite(side, idx, anim)
+    if (anim !== 'enter') return
+    // 入场动画播完就去掉 enter 类，否则它会盖住之后的攻击/受击动画
+    const el = this.spriteEl(side)
+    setTimeout(() => el.classList.remove('enter'), 450)
+    this.fx.enter(this.fxAt(side), this.st.sides[side].team[idx].shiny)
+  }
   hideMon(side) { this.spriteEl(side).className = 'b-mon gone' }
-  async fxRecall(side) { await this.anim(side, 'gone', 300) }
-  async fxMove(side /* , moveId */) { await this.anim(side, side === this.me ? 'lunge-me' : 'lunge-foe', 300) }
-  fxHit(side /* , e */) { this.anim(side, 'hit', 450) }
-  async fxMiss() {}
-  async fxFaint(side) { await this.anim(side, 'faint', 520) }
-  async fxStat() {}
-  fxHeal() {}
+  async fxRecall(side) {
+    this.fx.recall(this.fxAt(side), side === this.me)
+    await this.anim(side, 'gone', 300)
+  }
+  async fxMove(side, moveId) {
+    const mv = MOVES[moveId]
+    this.lastMoveType = mv.type
+    const A = this.fxAt(side), D = this.fxAt(1 - side)
+    if (!mv.power) {
+      this.anim(side, 'cast', 350)
+      await this.fx.status(moveId, A, D)
+      return
+    }
+    if (isContact(mv.type)) await this.anim(side, side === this.me ? 'lunge-me' : 'lunge-foe', 260)
+    else this.anim(side, 'cast', 350)
+    await this.fx.attack(mv.type, moveId, A, D, mv.power)
+  }
+  fxHit(side, e) {
+    this.anim(side, 'hit', 450)
+    this.fx.impact(this.lastMoveType || 'normal', this.fxAt(side), e)
+  }
+  async fxMiss(side) {
+    const t = 1 - side
+    this.anim(t, t === this.me ? 'dodge-me' : 'dodge-foe', 420)
+    this.fx.miss(this.fxAt(t))
+    await sleep(250)
+  }
+  async fxFaint(side) {
+    this.fx.faint(this.fxAt(side))
+    await this.anim(side, 'faint', 520)
+  }
+  async fxStat(side, stat, up) { await this.fx.statArrows(this.fxAt(side), up) }
+  fxHeal(side) { this.fx.heal(this.fxAt(side)) }
 
   // —— 选择行动 ——
   choose(forced, signal) {
@@ -410,10 +447,12 @@ export class BattleUI {
       ball.style.transform = `translate(${tx}px, ${ground}px) rotate(0deg)`
       await sleep(420)
     }
-    if (e.caught) ball.style.filter = 'brightness(0.7)'
+    const at = { x: tx + 16, y: ground + 16, r: 30 }
+    if (e.caught) { ball.style.filter = 'brightness(0.7)'; this.fx.caught(at) }
     else {
       ball.hidden = true
-      this.spriteEl(this.foe).className = 'b-mon enter'
+      this.fx.escaped(this.fxAt(this.foe))
+      this.showMon(this.foe, this.view.active[this.foe], 'enter')
     }
   }
 }

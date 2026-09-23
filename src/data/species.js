@@ -113,5 +113,14 @@ export const SPECIES = {
   },
 }
 
+// 坐骑专用的原创传说精灵（每位训练家开局赠送），不会在野外出现
+SPECIES.skyqilin = {
+  no: 19, name: '天穹麒麟', types: ['psychic', 'dragon'], base: { hp: 105, atk: 110, def: 100, spd: 125 }, catch: 3, xp: 300, mount: true,
+  learn: [[1, 'dragonpulse'], [1, 'psybeam'], [1, 'agility'], [1, 'headbutt']],
+  look: { body: 'long', c1: '#fbf6ea', c2: '#dfe7f1', c3: '#ffc43d', ears: 'horns', tail: 'curl', eyes: 'fierce', extra: ['mane', 'crest'] },
+  desc: '传说中踏云而行的神兽，金色的鬃毛能驱散雷雨。它愿意载着信任的训练家穿越整个世界。',
+}
+
 export const SPECIES_LIST = Object.entries(SPECIES).map(([id, s]) => ({ id, ...s })).sort((a, b) => a.no - b.no)
 export const STARTERS = ['flamefox', 'bubfrog', 'sprout']
+export const DEFAULT_MOUNT = 'skyqilin'

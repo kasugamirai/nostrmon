@@ -1,7 +1,7 @@
 // Nostrmon 共享核心：身份 → 世界连接 → 存档 → 社交 / 战斗。
 // 2D 与 3D 客户端都调用 startGame()，只替换大地图渲染（World）和战斗画面（BattleUI）。
 import { MAPS, RARE_SPAWNS } from '../data/maps.js'
-import { SPECIES } from '../data/species.js'
+import { SPECIES, DEFAULT_MOUNT } from '../data/species.js'
 import { createMon, snapshot, statsOf, gainXp, xpYield, canEvolve, evolve, healMon, monName, xpProgress } from '../mon.js'
 import { createBattle, aiPickMove, activeMon } from '../battle.js'
 import { ITEMS } from '../battleUI.js'
@@ -9,7 +9,7 @@ import { Net, Y } from '../net.js'
 import * as nostr from '../nostr.js'
 import { YJS_PRESET, YJS_RELAY, WORLD_ROOM, lsGet, lsSet } from '../config.js'
 import { $, say, toast, openModal, closeModal, modalOpen, dialogOpen, dialogKey } from '../ui.js'
-import { lookFromKey, trainerSprite } from '../render/sprites.js'
+import { lookFromKey, trainerSprite, monSprite } from '../render/sprites.js'
 import { openMenu, openShop, openPlayerCard, openOnline, openStarter, runEvolutions, renderPartyBar } from '../menus.js'
 import { pickWeighted, randId, shortKey, escapeHtml, sleep } from '../util.js'
 
@@ -51,6 +51,7 @@ function defaultSave(pk) {
     party: [], box: [],
     bag: { ball: 5, potion: 3 },
     coins: 100000,
+    mounts: [DEFAULT_MOUNT], mount: DEFAULT_MOUNT, riding: false,
     dex: { seen: {}, caught: {} },
     beaten: {},
     stats: { caught: 0, pvpW: 0, pvpL: 0 },
@@ -74,6 +75,14 @@ function normalizeSave(s, pk) {
   // 一次性补发：新规则下初始金币为 100000，老存档补足到这个数
   out.grants = { ...(s?.grants || {}) }
   if (!out.grants.coins100k) { out.coins = Math.max(out.coins || 0, 100000); out.grants.coins100k = true }
+  // 一次性赠送坐骑：天穹麒麟
+  if (!out.grants.mountQilin) {
+    out.mounts = [...new Set([...(out.mounts || []), DEFAULT_MOUNT])]
+    out.mount = out.mount || DEFAULT_MOUNT
+    out.dex.seen[DEFAULT_MOUNT] = true
+    out.grants.mountQilin = true
+  }
+  if (!SPECIES[out.mount]) { out.mount = DEFAULT_MOUNT; out.riding = false }
   return out
 }
 
@@ -224,6 +233,7 @@ game.captureKey = (e) => {
   }
   if (e.code === 'Escape' || e.code === 'KeyM' || e.code === 'KeyX') { openMenu(game); return true }
   if (e.code === 'KeyN') { openMenu(game, 'map'); return true }
+  if (e.code === 'KeyR') { game.toggleRide(); return true }
   return false
 }
 
@@ -235,9 +245,36 @@ game.leadInfo = () => {
   return m ? { sp: m.sp, shiny: !!m.shiny } : null
 }
 game.refreshPresence = () => {
-  game.net.setPresence({ name: game.save.name, look: game.save.look, lead: game.leadInfo() })
+  game.net.setPresence({ name: game.save.name, look: game.save.look, lead: game.leadInfo(), mount: game.isRiding() ? game.save.mount : null })
   updateHud()
 }
+
+// —— 坐骑 ——
+// save.riding 是玩家的选择；进到室内时自动下来，出门后恢复
+game.isRiding = () => !!(game.save?.riding && SPECIES[game.save.mount] && game.world?.map && !game.world.map.interior)
+game.toggleRide = (on = !game.save.riding) => {
+  const s = game.save
+  if (!SPECIES[s.mount]) { toast('你还没有坐骑。'); return }
+  if (on && game.world.map.interior) { toast('室内不能骑乘，出门再骑吧。'); return }
+  s.riding = on
+  game.refreshPresence()
+  updateRideBtn()
+  game.sys(on ? `骑上了 ${SPECIES[s.mount].name}，移动速度大幅提升！` : '从坐骑上下来了。')
+  game.saveSoon()
+}
+function updateRideBtn() {
+  const b = $('ride-btn')
+  if (!b) return
+  const s = game.save
+  b.hidden = !SPECIES[s.mount]
+  const on = game.isRiding()
+  b.classList.toggle('on', on)
+  b.querySelector('span').textContent = on ? '下来' : '骑乘'
+  const c = b.querySelector('canvas').getContext('2d')
+  c.clearRect(0, 0, 36, 36)
+  if (SPECIES[s.mount]) c.drawImage(monSprite(s.mount, { size: 36 }), 0, 0)
+}
+game.updateRideBtn = updateRideBtn
 
 // —— 地图传送 ——
 // 从 (x, y) 向外找最近的空地（不是障碍、NPC 或出入口）；near=true 时不落在目标格本身（落在好友/精灵旁边）
@@ -282,6 +319,8 @@ game.warp = (to, x, y, dir) => {
   game.world.loadMap(to, x, y, dir)
   game.save.pos = { map: to, x, y, dir }
   game.world.sendPresence()
+  game.net.setPresence({ mount: game.isRiding() ? game.save.mount : null })
+  updateRideBtn()
   banner(MAPS[to].name)
   game.saveSoon()
 }
@@ -790,7 +829,7 @@ async function boot() {
   if (okPos) game.world.loadMap(pos.map, pos.x, pos.y, pos.dir || 'down')
   else game.world.loadMap('town', MAPS.town.start.x, MAPS.town.start.y, 'down')
   const p = game.world.p
-  await net.initPresence({ name: game.save.name, look: game.save.look, lead: game.leadInfo(), map: game.world.map.id, x: p.x, y: p.y, dir: p.dir, busy: null, client: game.mode })
+  await net.initPresence({ name: game.save.name, look: game.save.look, lead: game.leadInfo(), map: game.world.map.id, x: p.x, y: p.y, dir: p.dir, busy: null, client: game.mode, mount: game.isRiding() ? game.save.mount : null })
 
   setupChat()
 
@@ -846,6 +885,13 @@ async function boot() {
   ;(OPTS.setupControls || setupTouch)(game)
   $('menu-btn').onclick = () => !game.battleUI.open && openMenu(game, 'party')
   if ($('map-btn')) $('map-btn').onclick = () => !game.battleUI.open && openMenu(game, 'map')
+  const rb = document.createElement('button')
+  rb.id = 'ride-btn'
+  rb.title = '坐骑（R）'
+  rb.innerHTML = '<canvas width="36" height="36"></canvas><span>骑乘</span>'
+  rb.onclick = () => !game.battleUI.open && !game.isBusy() && game.toggleRide()
+  $('app').appendChild(rb)
+  updateRideBtn()
   $('me-chip').onclick = () => !game.battleUI.open && openMenu(game, 'account')
   $('online-btn').onclick = () => !game.battleUI.open && openOnline(game)
   $('coins').onclick = () => !game.battleUI.open && openMenu(game, 'bag')
@@ -858,7 +904,7 @@ async function boot() {
   game.ready = true
   banner(game.world.map.name)
   game.sys(`欢迎来到 Nostrmon！你的身份：${shortKey(signer.npub)}`)
-  game.sys(OPTS.helpLine || '方向键/WASD 移动 · Shift 奔跑 · 空格 互动 · Enter 聊天 · Esc 菜单 · N 地图传送')
+  game.sys(OPTS.helpLine || '方向键/WASD 移动 · Shift 奔跑 · 空格 互动 · Enter 聊天 · Esc 菜单 · N 地图传送 · R 骑乘坐骑')
 
   if (!game.save.party.length) {
     await openStarter(game)

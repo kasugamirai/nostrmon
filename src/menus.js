@@ -152,13 +152,16 @@ function renderWorldMap(game, el) {
 // —— 队伍 ——
 function renderParty(game, el, selUid) {
   const s = game.save
+  const mt = SPECIES[s.mount]
   el.innerHTML = `
+    ${mt ? `<h3 style="margin-top:0">坐骑</h3><div class="moncard mountcard"><canvas data-sp="${s.mount}"></canvas><div><div class="nm">${mt.name} <span class="type" style="background:var(--gold);color:var(--ink)">传说坐骑</span></div><div class="sub">${escapeHtml(mt.desc)}</div><div class="sub">骑乘时移动速度 ×1.75，其他训练家也能看到你骑着它。按 R 键骑上或下来。</div></div><div><button class="btn small ${s.riding ? '' : 'gold'}" id="ride-toggle">${s.riding ? '下来' : '骑乘'}</button></div></div><h3>队伍</h3>` : ''}
     <p class="sub">队伍 ${s.party.length}/6 · 第一只会跟在你身后，所有人都看得到。</p>
     <div class="monlist" id="plist">${s.party.map((m, i) => monCard(m, { button: true, idx: i, extra: i === 0 ? '<span class="type" style="background:var(--ink)">首发</span>' : '' })).join('')}</div>
     <div id="pdetail"></div>
     <h3>仓库 <span class="sub">${s.box.length} 只</span></h3>
     <div class="monlist" id="blist">${s.box.length ? s.box.map((m, i) => monCard(m, { button: true, idx: i })).join('') : '<p class="sub">仓库是空的。队伍满 6 只后新收服的精灵会放到这里。</p>'}</div>`
   paintCanvases(el)
+  el.querySelector('#ride-toggle')?.addEventListener('click', () => { game.toggleRide(); renderParty(game, el) })
   el.querySelectorAll('#plist .moncard').forEach((b) => (b.onclick = () => detail('party', +b.dataset.idx)))
   el.querySelectorAll('#blist .moncard').forEach((b) => (b.onclick = () => detail('box', +b.dataset.idx)))
   if (selUid) {

@@ -617,7 +617,7 @@ function makeInstanced(geo, material, mats, cols) {
 
 function buildGrass(ctx) {
   const { map, pal, U } = ctx
-  const H = 0.6
+  const H = 0.5
   const mats = [], cols = [], tm = [], tc = []
   for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
     const t = map.tiles[y][x]

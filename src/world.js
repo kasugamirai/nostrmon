@@ -167,7 +167,7 @@ export class World {
   // —— 更新 ——
   update(dt) {
     const p = this.p
-    const speed = this.running ? RUN : WALK
+    const speed = (this.running ? RUN : WALK) * (this.g.isRiding?.() ? 1.75 : 1)
     if (p.t < 1) {
       p.t = Math.min(1, p.t + dt * speed)
       if (p.t >= 1) this.arrive()
@@ -307,10 +307,25 @@ export class World {
       } })
     }
     for (const n of map.npcs) ents.push({ y: n.y, draw: () => ctx.drawImage(trainerSprite(n.look, n.dir, 0), n.x * 16 - 1, n.y * 16 - 7) })
-    const pushTrainer = (mv, look, dir, lead) => {
+    const pushTrainer = (mv, look, dir, lead, mount) => {
       const [x, y] = lerpPos(mv)
       const walking = mv.t < 1
       const fr = walking ? (mv.t < 0.5 ? (mv.step % 2 ? 1 : 2) : 0) : 0
+      if (mount && SPECIES[mount] && !this.map.interior) {
+        // 骑乘：坐骑在下，骑手只画上半身坐在背上；不带跟随精灵
+        ents.push({ y, draw: () => {
+          const X = Math.round(x * 16), Y = Math.round(y * 16)
+          const bob = walking ? -Math.round(Math.abs(Math.sin(mv.t * Math.PI)) * 2) : Math.round(Math.sin(this.time * 3))
+          const flip = dir === 'right'
+          ctx.save()
+          if (flip) { ctx.translate(X * 2 + 16, 0); ctx.scale(-1, 1) }
+          ctx.drawImage(monSprite(mount, { size: 36, back: dir === 'up' }), X - 10, Y - 19 + bob)
+          ctx.restore()
+          ctx.drawImage(trainerSprite(look, dir, 0), 0, 0, 18, 15, X + (flip ? -2 : 2), Y - 19 + bob, 18, 15)
+          this.grassOver(x, y)
+        } })
+        return
+      }
       if (lead && SPECIES[lead.sp]) {
         const [fx, fy] = lerpPos(mv.fol)
         ents.push({ y: fy - 0.01, draw: () => {
@@ -326,10 +341,10 @@ export class World {
     }
     for (const r of this.remotes.values()) {
       r.fol.step = r.step
-      pushTrainer(r, r.state.look || {}, r.state.dir || 'down', r.state.lead)
+      pushTrainer(r, r.state.look || {}, r.state.dir || 'down', r.state.lead, r.state.mount)
     }
     this.fol.step = p.step
-    pushTrainer(Object.assign(p, { fol: this.fol }), this.g.save.look, p.dir, this.g.leadInfo())
+    pushTrainer(Object.assign(p, { fol: this.fol }), this.g.save.look, p.dir, this.g.leadInfo(), this.g.isRiding?.() ? this.g.save.mount : null)
     ents.sort((a, b) => a.y - b.y)
     for (const e of ents) e.draw()
 
@@ -387,8 +402,8 @@ export class World {
       pill(ctx, sx, sy, `${s.shiny ? '✦ ' : ''}${SPECIES[s.sp].name} Lv.${s.lv}`, 'rgba(255,196,61,.95)', INK)
     }
     // 玩家名、聊天气泡、表情
-    const labelFor = (x, y, name, pk, cid, isMe, verified) => {
-      const [sx, sy] = this.toScreen(x * 16 + 8, y * 16 - 13)
+    const labelFor = (x, y, name, pk, cid, isMe, verified, riding) => {
+      const [sx, sy] = this.toScreen(x * 16 + 8, y * 16 - 13 - (riding ? 12 : 0))
       ctx.font = `600 ${Math.max(11, Z * 3)}px "Noto Sans SC", sans-serif`
       pill(ctx, sx, sy, (verified ? '✓ ' : '') + name, isMe ? 'rgba(255,196,61,.95)' : 'rgba(28,26,46,.8)', isMe ? INK : '#fff')
       const em = this.g.emotes.get(cid)
@@ -403,9 +418,9 @@ export class World {
     }
     for (const r of this.remotes.values()) {
       const [x, y] = lerpPos(r)
-      labelFor(x, y, r.state.name || '训练家', r.state.pk, r.state.cid, false, this.g.net.isVerified(r.state))
+      labelFor(x, y, r.state.name || '训练家', r.state.pk, r.state.cid, false, this.g.net.isVerified(r.state), !!r.state.mount && !this.map.interior)
     }
-    labelFor(ppx, ppy, this.g.save.name, this.g.signer.pubkey, this.g.net?.cid, true, true)
+    labelFor(ppx, ppy, this.g.save.name, this.g.signer.pubkey, this.g.net?.cid, true, true, this.g.isRiding?.())
   }
 }
 
