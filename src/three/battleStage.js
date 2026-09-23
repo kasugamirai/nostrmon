@@ -307,8 +307,13 @@ function canvasTex(w, h, draw) {
   return t
 }
 
+// 贴图创建失败（极少见）时返回空对象：特效退化为无贴图的纯色，但不影响 3D 战斗本身
 function makeTextures() {
   if (typeof document === 'undefined') return {}
+  try { return drawTextures() } catch (err) { console.warn('[battle3d] 贴图创建失败', err); return {} }
+}
+
+function drawTextures() {
   const glow = canvasTex(64, 64, (x, w) => {
     const g = x.createRadialGradient(w / 2, w / 2, 0, w / 2, w / 2, w / 2)
     g.addColorStop(0, 'rgba(255,255,255,1)')
@@ -980,6 +985,10 @@ export class BattleStage {
     this.bg = bg
     this.kind = cfg.kind || 'wild'
     this.env(bg)
+    // 上一场残留的延迟特效（关闭后才结束的链式动画）一并清掉
+    for (const c of [...this.fxRoot.children]) this.drop(c)
+    this.glow.clear()
+    this.solid.clear()
     this.world = new THREE.Group()
     try {
       this.arena = buildArena(bg, this.kind, this.tex)
@@ -1007,6 +1016,15 @@ export class BattleStage {
     this.time = 0
     this.shakeAmp = 0
     this.punchK = 0
+    // 开场运镜：野生战从对手特写拉远，训练家 / 对战从高空俯冲
+    if (cfg.wild) {
+      this.sweepFrom.set(HOME.foe.x - 1.2, 1.9, HOME.foe.z + 4.4)
+      this.sweepLook.set(HOME.foe.x, 1.1, HOME.foe.z)
+    } else {
+      this.sweepFrom.set(MID.x + 7, 8.5, MID.z + 13)
+      this.sweepLook.set(MID.x, 0.5, MID.z - 2)
+    }
+    this.sweepK = 0
     this.running = true
     this.resize()
     if (cfg.wild) {
@@ -1020,15 +1038,6 @@ export class BattleStage {
       if (this.running && now - this.last > 400) { this.step(Math.min(1, (now - this.last) / 1000)); this.last = now }
     }, 250)
     this.wipe()
-    // 开场运镜：野生战从对手特写拉远，训练家 / 对战从高空俯冲
-    if (cfg.wild) {
-      this.sweepFrom.set(HOME.foe.x - 1.2, 1.9, HOME.foe.z + 4.4)
-      this.sweepLook.set(HOME.foe.x, 1.1, HOME.foe.z)
-    } else {
-      this.sweepFrom.set(MID.x + 7, 8.5, MID.z + 13)
-      this.sweepLook.set(MID.x, 0.5, MID.z - 2)
-    }
-    this.sweepK = 0
     const p = this.tween(1.1, (k) => { this.sweepK = k }, E.lin)
     if (this.kind === 'pvp') this.wait(700).then(() => this.celebrate(0.6))
     return p.then(() => true)
@@ -1097,7 +1106,7 @@ export class BattleStage {
     const px = h * this.renderer.getPixelRatio() * 0.5
     this.glow.mat.uniforms.uPx.value = px
     this.solid.mat.uniforms.uPx.value = px
-    if (this.running) this.render()
+    if (this.running) { this.updateCamera(0); this.render() }
   }
 
   frame(now) {
@@ -1123,7 +1132,7 @@ export class BattleStage {
     }
     // 回调里同步新建的任务会追加到数组末尾并在本轮一起推进；j 永远不超过 i，压缩不会覆盖未处理的任务
     tasks.length = j
-    for (const key in this.slots) this.composeMon(this.slots[key])
+    for (const key in this.slots) this.composeMon(this.slots?.[key])
     if (this.arena) this.arena.update(t, dt, this)
     this.sky.material.uniforms.uTime.value = t
     this.glow.update(dt, t)
@@ -1201,7 +1210,7 @@ export class BattleStage {
     let model
     try { model = buildCreature(info.sp, { shiny: !!info.shiny, flash: true }) } catch (err) { console.warn('[battle3d] buildCreature', err) }
     if (!model) return null
-    model.traverse((o) => { if (o.isMesh && !o.userData.isOutline) o.castShadow = true })
+    model.traverse((o) => { if (o.isMesh && !o.userData.isOutline && !o.userData.noShadow) o.castShadow = true })
     const rig = new THREE.Group()
     rig.rotation.order = 'YXZ'
     rig.add(model)
@@ -1230,7 +1239,7 @@ export class BattleStage {
       if (m.model.userData?.dispose) m.model.userData.dispose()
       else disposeTree(m.model)
     } catch (err) { console.warn('[battle3d] dispose', err) }
-    if (m.fadeMats) for (const f of m.fadeMats) f.mat.dispose()
+    if (m.fadeMats) for (const f of m.fadeMats) if (f.own) f.mat.dispose()
     S.blob.material.opacity = 0
   }
 
@@ -1469,6 +1478,16 @@ export class BattleStage {
     return this.tween(dur, (k) => { m.tint = amt * (1 - k) }, E.lin).then(() => { if (m.tintColor === color) m.tint = 0 })
   }
 
+  // 嘴前蓄力光点（喷射类招式的起手）
+  async charge(a, d, color, dur = 0.2, size = 0.8) {
+    const p = this.mouth(a, d, V())
+    const g = this.sprite(color, 0.01)
+    g.position.copy(p)
+    const pull = spec({ speed: [0.6, 1.2], life: [0.18, 0.28], size: [0.1, 0.18], end: 0.1, color: 0xffffff, color2: color, jitter: 0.5, drag: 0 })
+    await this.tween(dur, (k) => { g.scale.setScalar(size * k); this.emit(pull, p, 2) }, E.out)
+    this.tween(0.25, (k) => { g.material.opacity = 1 - k }, E.lin).then(() => this.drop(g))
+  }
+
   // 施法小后仰
   cast(key, dur = 0.22) {
     const m = this.slots?.[key]?.mon
@@ -1525,7 +1544,7 @@ export class BattleStage {
 
   async showMon(key, info) {
     if (!this.running || !this.slots) return
-    const S = this.slots[key]
+    const S = this.slots?.[key]
     const cur = S.mon
     if (cur && cur.preplaced && cur.idx === info.idx && cur.sp === info.sp) {
       cur.preplaced = false
@@ -1539,12 +1558,12 @@ export class BattleStage {
   }
 
   hideMon(key) {
-    if (this.slots?.[key]) this.removeMon(this.slots[key])
+    if (this.slots?.[key]) this.removeMon(this.slots?.[key])
   }
 
   // 野生精灵登场：跳一下 + 尘土，闪光个体撒星星
   async cryFx(key) {
-    const m = this.slots[key].mon
+    const m = this.slots?.[key]?.mon
     if (!m) return
     const feet = this.feetOf(key, V())
     this.act(m, 'happy', 0.8)
@@ -1576,7 +1595,9 @@ export class BattleStage {
       ball.scale.setScalar(1.7)
       this.add(ball)
       await this.fly(ball, from, to, 0.42, { arc: 1.3, onStep: (k, p, dt) => { ball.rotation.x -= dt * 16 } })
-      this.drop(ball)
+      ball.rotation.set(0, Math.atan2(this.camera.position.x - to.x, this.camera.position.z - to.z), 0)
+      try { ball.userData.open?.(1) } catch { /* 旧模型没有开盖 */ }
+      this.tween(0.16, (k) => { ball.scale.setScalar(1.7 * (1 - k * 0.6)) }, E.lin).then(() => this.drop(ball))
     }
     this.impactStar(to, 0xffffff, 1.6, 0.35)
     this.emit(spec({ shape: 1, speed: [2, 5], life: [0.4, 0.8], size: [0.2, 0.4], end: 0.1, color: 0xffffff, color2: 0xbfe6ff, drag: 3 }), to, 24)
@@ -1641,7 +1662,7 @@ export class BattleStage {
     this.lastType = mv.type
     this.lastMove = id
     this.drainFor = mv.effect?.drain ? key : null
-    if (!this.slots[key].mon) return
+    if (!this.slots?.[key]?.mon) return
     if (!mv.power) return this.statusFx(key, d, mv, id)
     const k = clamp(mv.power / 60, 0.6, 1.6)
     const fn = this['fx_' + mv.type] || this.fx_normal
@@ -1761,8 +1782,9 @@ export class BattleStage {
       await Promise.all(shots)
       return
     }
-    // 水枪：水柱 + 喷射粒子
-    this.cast(a, 0.3)
+    // 水枪：蓄力 → 水柱 + 喷射粒子
+    this.cast(a, 0.4)
+    await this.charge(a, d, C[1], 0.18, 0.6)
     const from = this.mouth(a, d, V())
     const jet = this.add(new THREE.Mesh(this.geo.beam, this.fxMat(C[1], { opacity: 0.55 })))
     const core = this.add(new THREE.Mesh(this.geo.beam, this.fxMat(C[0], { opacity: 0.7 })))
@@ -1955,7 +1977,8 @@ export class BattleStage {
       return
     }
     // 冰冻光束
-    this.cast(a, 0.3)
+    this.cast(a, 0.45)
+    await this.charge(a, d, C[1], 0.24, 0.9)
     const from = this.mouth(a, d, V())
     const outer = this.add(new THREE.Mesh(this.geo.beam, this.fxMat(C[1], { opacity: 0.6 })))
     const core = this.add(new THREE.Mesh(this.geo.beam, this.fxMat(0xffffff, { opacity: 0.95 })))
@@ -2021,7 +2044,7 @@ export class BattleStage {
     const feetD = this.feetOf(d, V())
     const mud = spec({ pool: 'solid', shape: 2, speed: [2, 4], life: [0.45, 0.8], size: [0.08, 0.16], end: 0.6, color: 0x7a5230, color2: 0x9a6a3a, grav: 9, up: 2.2, drag: 1 })
     if (id === 'dig') {
-      const m = this.slots[a].mon
+      const m = this.slots?.[a]?.mon
       const feetA = this.feetOf(a, V())
       this.act(m, 'attack', 1.2)
       this.dust(feetA, 0xb08a5a, 1)
@@ -2140,15 +2163,14 @@ export class BattleStage {
     const lo = this.add(new THREE.Mesh(this.geo.jaw, this.fxMat(color, { opacity: 0.95 })))
     up.renderOrder = lo.renderOrder = 8
     const flip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI)
-    const place = (gap, op) => {
-      for (const [j, s] of [[up, 1], [lo, -1]]) {
-        j.quaternion.copy(this.camera.quaternion)
-        if (s < 0) j.quaternion.multiply(flip)
-        j.scale.setScalar(R)
-        j.position.copy(c).addScaledVector(this._pv.set(0, 1, 0).applyQuaternion(this.camera.quaternion), s * gap)
-        j.material.opacity = op
-      }
+    const jawPos = (j, s, gap, op) => {
+      j.quaternion.copy(this.camera.quaternion)
+      if (s < 0) j.quaternion.multiply(flip)
+      j.scale.setScalar(R)
+      j.position.copy(c).addScaledVector(this._pv.set(0, 1, 0).applyQuaternion(this.camera.quaternion), s * gap)
+      j.material.opacity = op
     }
+    const place = (gap, op) => { jawPos(up, 1, gap, op); jawPos(lo, -1, gap, op) }
     await this.tween(0.16, (k) => place(R * (0.9 - k * 0.85), 0.95), E.in2)
     this.impactStar(c, 0xffffff, 1)
     this.shake(0.2)
@@ -2221,14 +2243,14 @@ export class BattleStage {
       }
       await this.wait(330)
       this.ringPulse(target, C[1], this.radius(d) * 2.3, 0.5, { normal: dir })
-      const tm = this.slots[d].mon
+      const tm = this.slots?.[d]?.mon
       if (tm) tm.wob = 1
       this.wait(500).then(() => { const m = this.slots?.[d]?.mon; if (m) m.wob = 0 })
       return
     }
     // 念力：目标周围粉色同心圆涟漪 + 目标晃动
     this.cast(a, 0.35)
-    const m = this.slots[d].mon
+    const m = this.slots?.[d]?.mon
     for (let i = 0; i < 4; i++) this.wait(i * 110).then(() => this.ringPulse(this.center(d, V(), 0.5), i % 2 ? C[0] : C[1], this.radius(d) * (1.8 + i * 0.35), 0.55, { from: 0.1, width: i % 2 ? 'thin' : 'ring' }))
     if (m) m.wob = 1
     this.emit(spec({ shape: 1, speed: [0.4, 1.2], life: [0.4, 0.7], size: [0.14, 0.26], end: 0.2, color: C[0], color2: C[1], jitter: this.radius(d) * 0.8, drag: 1 }), target, 16)
@@ -2292,7 +2314,7 @@ export class BattleStage {
   }
 
   async auraFx(key, col, id) {
-    const m = this.slots[key].mon
+    const m = this.slots?.[key]?.mon
     if (!m) return
     const feet = this.feetOf(key, V())
     const R = this.radius(key)
@@ -2317,7 +2339,7 @@ export class BattleStage {
   }
 
   async agilityFx(key) {
-    const m = this.slots[key].mon
+    const m = this.slots?.[key]?.mon
     if (!m) return
     const side = V(HOME[OTHER[key]].z - HOME[key].z, 0, HOME[key].x - HOME[OTHER[key]].x).normalize()
     const streak = spec({ speed: [0.05, 0.2], life: [0.18, 0.3], size: [0.3, 0.5], end: 0.3, color: 0xffd6e8, color2: 0xffffff, jitter: 0.35, drag: 1 })
@@ -2334,7 +2356,7 @@ export class BattleStage {
   }
 
   async soundWaves(a, d) {
-    const m = this.slots[a].mon
+    const m = this.slots?.[a]?.mon
     if (m) this.act(m, 'happy', 0.7)
     const from = this.mouth(a, d, V())
     const to = this.center(d, V(), 0.55)
@@ -2351,7 +2373,7 @@ export class BattleStage {
     this.impactStar(eye, 0xff3a3a, 0.9, 0.45)
     this.impactStar(eye.clone().add(V(0.25, 0, 0)), 0xff3a3a, 0.7, 0.45)
     await this.wait(300)
-    const m = this.slots[d].mon
+    const m = this.slots?.[d]?.mon
     if (m) { m.wob = 0.6; this.wait(450).then(() => { m.wob = 0 }) }
   }
 
@@ -2370,7 +2392,7 @@ export class BattleStage {
   }
 
   async sunHeal(key) {
-    const m = this.slots[key].mon
+    const m = this.slots?.[key]?.mon
     if (!m) return
     const feet = this.feetOf(key, V())
     const R = this.radius(key)
@@ -2463,10 +2485,13 @@ export class BattleStage {
     m.alpha = 0
   }
 
-  // 倒下时替换为可调色的材质副本：逐渐去色并淡出（描边直接隐藏）
+  // 倒下时逐渐去色并淡出（描边直接隐藏）。flash 实例的私有材质（userData.unique）原地修改，
+  // 共享材质才克隆一份，克隆由舞台自己释放
   prepareFade(m) {
     if (m.fadeMats) return
     m.fadeMats = []
+    m.tint = 0
+    m.hitFlash = 0
     const map = new Map()
     m.model.traverse((o) => {
       if (!o.material) return
@@ -2474,12 +2499,12 @@ export class BattleStage {
       const swap = (mat) => {
         if (!mat) return mat
         if (!map.has(mat)) {
-          const c = mat.clone()
-          c.userData = {}
+          const own = !mat.userData?.unique
+          const c = own ? mat.clone() : mat
+          if (own) c.userData = {}
           c.transparent = true
-          const f = { mat: c, color: c.color ? c.color.clone() : null, emissive: c.emissive ? c.emissive.clone() : null }
+          m.fadeMats.push({ mat: c, own, color: c.color ? c.color.clone() : null, emissive: c.emissive ? c.emissive.clone() : null })
           map.set(mat, c)
-          m.fadeMats.push(f)
         }
         return map.get(mat)
       }
@@ -2547,7 +2572,7 @@ export class BattleStage {
     // 吸取类招式：先让绿色光球从对手飞回
     const drain = this.drainFor === key
     this.drainFor = null
-    if (drain && this.slots[OTHER[key]].mon) {
+    if (drain && this.slots?.[OTHER[key]]?.mon) {
       const src = this.center(OTHER[key], V(), 0.5)
       const dst = this.center(key, V(), 0.5)
       const trail = spec({ speed: [0.05, 0.2], life: [0.2, 0.35], size: [0.1, 0.18], end: 0.2, color: 0xdcff9a, color2: 0x6fd13f, drag: 1 })
@@ -2583,7 +2608,7 @@ export class BattleStage {
       o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material)
     })
     const bs = 1.9
-    const rad = 0.12 * bs
+    const rad = (ball.userData.radius || 0.12) * bs
     ball.scale.setScalar(bs)
     this.add(ball)
     const from = this.camera.localToWorld(V(-0.9, -0.8, -2.4))
@@ -2599,9 +2624,11 @@ export class BattleStage {
     glow.position.copy(hover)
     const red = spec({ speed: [0.4, 1], life: [0.25, 0.4], size: [0.16, 0.3], end: 0.1, color: 0xffc0c0, color2: 0xff3a3a, drag: 0, jitter: 0.05 })
     const tp = V()
+    const lid = (a) => { try { ball.userData.open?.(a) } catch { /* 旧模型没有开盖 */ } }
     if (m) {
       m.hitColor = 0xff3a3a
       await this.tween(0.5, (k) => {
+        lid(Math.min(1, k * 5) * (k > 0.8 ? (1 - k) / 0.2 : 1))
         m.hitFlash = Math.min(1, k * 4)
         m.pop = 1 - E.in(k)
         glow.scale.setScalar(this.radius('foe') * 3 * Math.sin(Math.PI * Math.min(1, k * 1.2)))
@@ -2612,13 +2639,14 @@ export class BattleStage {
       m.hidden = true
       m.hitFlash = 0
     } else await this.wait(300)
+    lid(0)
     this.drop(glow)
     // 落地弹跳
     const floor = HOME.foe.y + rad
     const y0 = ball.position.y
-    await this.tween(0.55, (k) => { ball.position.y = lerp(y0, floor, E.bounce(k)) }, E.lin)
+    await this.tween(0.5, (k) => { ball.position.y = lerp(y0, floor, E.bounce(k)) }, E.lin)
     this.dust(this.feetOf('foe', V()), 0xd8c7a0, 0.5)
-    await this.wait(220)
+    await this.wait(180)
     const shakes = Math.max(0, Math.min(3, e.shakes | 0))
     const click = spec({ shape: 1, speed: [0.5, 1.2], life: [0.2, 0.35], size: [0.1, 0.18], end: 0.1, color: 0xffffff, color2: 0xfff0a0, drag: 2 })
     for (let i = 0; i < shakes; i++) {
@@ -2628,7 +2656,7 @@ export class BattleStage {
       }, E.lin)
       ball.rotation.z = 0
       this.emit(click, ball.position, 5)
-      await this.wait(260)
+      await this.wait(200)
     }
     if (e.caught) {
       const c = ball.position.clone()
@@ -2637,15 +2665,16 @@ export class BattleStage {
       this.emit(spec({ pool: 'solid', shape: 5, speed: [1.5, 3], life: [0.9, 1.4], size: [0.1, 0.16], end: 1, color: 0xffc43d, color2: 0xff5a5f, grav: 3, drag: 2, up: 2.5 }), c, 18)
       for (let i = 0; i < 3; i++) this.wait(120 + i * 140).then(() => this.impactStar(c.clone().add(V(rnd(-0.5, 0.5), rnd(0.2, 0.7), 0)), 0xfff3a0, 0.6))
       const cols = own.filter((mt) => mt.color).map((mt) => [mt, mt.color.clone()])
-      await this.tween(0.4, (k) => { for (const [mt, c0] of cols) mt.color.copy(c0).multiplyScalar(1 - 0.45 * k) }, E.lin)
+      await this.tween(0.3, (k) => { for (const [mt, c0] of cols) mt.color.copy(c0).multiplyScalar(1 - 0.45 * k) }, E.lin)
       return
     }
-    // 挣脱：球炸开，精灵重新弹出
+    // 挣脱：球盖弹开、闪光，精灵重新弹出
+    lid(1)
     const c = ball.position.clone()
     this.screenFlash('#ffffff', 0.45, 200)
     this.impactStar(c.clone().setY(c.y + 0.4), 0xffffff, 1.8)
     this.emit(spec({ shape: 1, speed: [2, 5], life: [0.3, 0.6], size: [0.18, 0.32], end: 0.1, color: 0xffffff, color2: 0xff9a9a, drag: 3 }), c, 24)
-    this.drop(ball)
+    this.tween(0.24, (k) => { ball.scale.setScalar(bs * (1 - E.in2(k))) }, E.lin).then(() => this.drop(ball))
     if (m) {
       m.hidden = false
       m.hitColor = 0xffffff

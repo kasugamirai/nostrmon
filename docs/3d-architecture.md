@@ -65,6 +65,17 @@ Interior tile chars (all rows are indoor):
 are the back wall, column 0 and column w-1 are side walls), `C` counter (solid, waist-high), `b` bed (solid, 2 tiles tall
 vertically: top tile = headboard + pillow), `t` table, `c` chair / bench, `h` bookshelf (tall, against the back wall),
 `D` shop display shelf with goods, `P` potted plant, `M` healing machine with glowing orbs, `v` TV on a stand.
+More furniture (all solid, one tile each): `F` fridge / drinks cooler, `K` kitchen counter (stove on even x, sink on odd x),
+`L` standing floor lamp (emits warm light — a small PointLight or emissive shade), `O` sofa (adjacent `O` tiles form one
+sofa; arms at the ends), `A` wardrobe (tall), `E` desk with a computer monitor, `G` fireplace against the back wall with animated fire,
+`Q` aquarium on a stand with swimming fish.
+Each interior also has `theme: { wall, stripe, trim, floor: 'light'|'dark', sofa }` (wallpaper base / stripe colour,
+skirting + frame colour, wood-floor tone, sofa fabric) and `decor: [{ x, y, k }]` — small non-blocking props:
+on the back wall face (y = 1): `window`, `curtain` (window with curtains), `painting`, `clock`, `poster`, `calendar`,
+`certificate`, `worldmap`, `shelfWall`; on top of a table/counter/shelf/desk/kitchen tile: `vase`, `teaset`, `bread`, `books`,
+`trophy`, `register`, `bell`, `flowerpot`, `lamp`. The 2D client draws plain windows on wall-face tiles where
+`x % 4 === 2` unless a decor item occupies that tile; do the same in 3D so both clients show the same room.
+The reference look for every tile and decor item is the 2D painter in `src/render/tiles.js` (drawTile / drawDecor).
 3D rendering for `map.interior`: warm indoor lighting (no sun/sky; a few soft point lights or a hemisphere + directional
 with short shadows), floor mesh from `floor`/`R`/`x`, back wall ~2.2 units tall with windows/pictures, side walls lower
 (~1.2) or faded when they would hide the player, furniture as simple cel-shaded props, a dark void (`bg`) around the room,

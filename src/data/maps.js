@@ -1,6 +1,8 @@
 // 地图用种子随机数确定性生成 —— 所有客户端看到的世界完全一致。
 // 户外图块：. 草地  , 高草丛(遇敌)  = 土路  p 石板  ~ 水  s 沙  T 树  f 花  # 栅栏  r 岩石  S 告示牌  B 栈桥
 // 室内图块：w 木地板  k 瓷砖地板  R 地毯  x 出口地垫（传送）  W 墙  C 柜台  b 床  t 桌子  c 椅子/长凳  h 书架  D 货架  P 盆栽  M 治疗机  v 电视
+//          F 冰箱/冷柜  K 灶台/水槽  L 落地灯  O 沙发  A 衣柜  E 书桌+电脑  G 壁炉  Q 鱼缸
+// 室内还有 theme（墙纸/地板配色）和 decor（挂在墙上或摆在桌面/柜台上的小物件，不占格子）
 import { mulberry32 } from '../util.js'
 
 const grid = (w, h, ch) => Array.from({ length: h }, () => Array(w).fill(ch))
@@ -194,11 +196,23 @@ function room(w, h, floor) {
   set(g, mx, h - 1, 'x')
   return { g, mx }
 }
-function interior(id, name, outside, door, { w, h, floor, build, npcs = [], signs = {} }) {
+// theme: { wall, stripe, trim, floor: 'light'|'dark', sofa }
+// decor: [{ x, y, k }]，k ∈ window curtain painting clock poster calendar certificate worldmap shelfWall
+//        （以上挂在墙面行 y=1）| vase teaset bread books trophy register bell flowerpot lamp（放在桌面/柜台/书架上）
+const THEMES = {
+  home: { wall: '#f6e3c6', stripe: '#ecd2ac', trim: '#8a5a2b', floor: 'light', sofa: '#e07a5f' },
+  kid: { wall: '#d9ecf7', stripe: '#c5e0f0', trim: '#5a6f8a', floor: 'light', sofa: '#5b8def' },
+  center: { wall: '#fde4ea', stripe: '#f7cfd9', trim: '#c05070', floor: 'light', sofa: '#ef476f' },
+  shop: { wall: '#e3f1e0', stripe: '#cfe6c9', trim: '#3f7d5a', floor: 'light', sofa: '#3a86ff' },
+  elder: { wall: '#efe0c9', stripe: '#e0cba9', trim: '#5e3a1d', floor: 'dark', sofa: '#7a3b2e' },
+  bakery: { wall: '#fff1d6', stripe: '#f6deb0', trim: '#a8663a', floor: 'light', sofa: '#e9a23b' },
+}
+
+function interior(id, name, outside, door, { w, h, floor, theme, build, decor = [], npcs = [], signs = {} }) {
   const { g, mx } = room(w, h, floor)
   build(g)
   return {
-    id, name, g, bg: '#15131f', battleBg: 'meadow', interior: true, floor,
+    id, name, g, bg: '#15131f', battleBg: 'meadow', interior: true, floor, theme: THEMES[theme], decor,
     entry: { x: mx, y: h - 2 },
     signs, buildings: [], npcs,
     warps: [{ x: mx, y: h - 1, w: 1, h: 1, to: outside, tx: door[0], ty: door[1] + 1, dir: 'down' }],
@@ -208,14 +222,20 @@ function interior(id, name, outside, door, { w, h, floor, build, npcs = [], sign
 
 function centerRoom(id, name, outside, door, nurseId) {
   return interior(id, name, outside, door, {
-    w: 13, h: 9, floor: 'k',
+    w: 13, h: 9, floor: 'k', theme: 'center',
     build: (g) => {
       rect(g, 3, 3, 7, 1, 'C')
       set(g, 4, 2, 'M'); set(g, 8, 2, 'M')
       set(g, 1, 2, 'P'); set(g, 11, 2, 'P'); set(g, 1, 7, 'P'); set(g, 11, 7, 'P')
       rect(g, 1, 5, 2, 1, 'c'); rect(g, 10, 5, 2, 1, 'c')
+      set(g, 11, 4, 'Q'); set(g, 1, 4, 'L')
       rect(g, 5, 5, 3, 3, 'R')
     },
+    decor: [
+      { x: 2, y: 1, k: 'poster' }, { x: 6, y: 1, k: 'clock' }, { x: 10, y: 1, k: 'certificate' },
+      { x: 3, y: 1, k: 'curtain' }, { x: 9, y: 1, k: 'curtain' },
+      { x: 5, y: 3, k: 'bell' }, { x: 3, y: 3, k: 'flowerpot' }, { x: 9, y: 3, k: 'books' },
+    ],
     npcs: [{ id: nurseId, x: 6, y: 2, dir: 'down', name: '驿站护士', look: L(0, 6, 7, 1, 2, 0), action: 'heal',
       lines: ['欢迎来到精灵驿站！', '我来帮你的精灵们恢复体力……', '♪ ♪ ♪', '你的精灵都恢复健康了！欢迎再来！'] }],
     signs: {},
@@ -224,13 +244,18 @@ function centerRoom(id, name, outside, door, nurseId) {
 
 function shopRoom(id, name, outside, door, clerkId) {
   return interior(id, name, outside, door, {
-    w: 11, h: 8, floor: 'k',
+    w: 11, h: 8, floor: 'k', theme: 'shop',
     build: (g) => {
       rect(g, 1, 3, 3, 1, 'C')
       rect(g, 6, 2, 4, 1, 'D'); rect(g, 6, 4, 4, 1, 'D')
+      rect(g, 4, 2, 1, 1, 'F')
       set(g, 1, 6, 'P'); set(g, 9, 6, 'P')
       rect(g, 4, 5, 3, 2, 'R')
     },
+    decor: [
+      { x: 2, y: 1, k: 'poster' }, { x: 5, y: 1, k: 'clock' }, { x: 8, y: 1, k: 'calendar' },
+      { x: 2, y: 3, k: 'register' }, { x: 1, y: 3, k: 'flowerpot' },
+    ],
     npcs: [{ id: clerkId, x: 2, y: 2, dir: 'down', name: '店员', look: L(1, 0, 1, 3, 1, 1), action: 'shop',
       lines: ['欢迎光临！需要点什么？'] }],
   })
@@ -238,50 +263,71 @@ function shopRoom(id, name, outside, door, clerkId) {
 
 const INTERIORS = [
   interior('town_home', '你的家', 'town', [7, 9], {
-    w: 11, h: 9, floor: 'w',
+    w: 11, h: 9, floor: 'w', theme: 'home',
     build: (g) => {
-      set(g, 2, 2, 'v'); rect(g, 3, 2, 2, 1, 'h')
-      rect(g, 8, 2, 1, 2, 'b')
-      rect(g, 4, 4, 2, 1, 't'); set(g, 3, 4, 'c'); set(g, 6, 4, 'c')
+      rect(g, 1, 2, 2, 1, 'K'); set(g, 3, 2, 'F')
+      set(g, 5, 2, 'v'); set(g, 6, 2, 'h')
+      set(g, 8, 2, 'L'); rect(g, 9, 2, 1, 2, 'b')
+      rect(g, 2, 4, 2, 1, 't'); set(g, 1, 4, 'c'); set(g, 4, 4, 'c')
+      rect(g, 5, 4, 2, 1, 'O')
       rect(g, 3, 6, 5, 2, 'R')
-      set(g, 1, 2, 'P'); set(g, 9, 7, 'P')
+      set(g, 1, 7, 'P'); set(g, 9, 7, 'P')
     },
+    decor: [
+      { x: 2, y: 1, k: 'shelfWall' }, { x: 4, y: 1, k: 'curtain' }, { x: 6, y: 1, k: 'painting' },
+      { x: 8, y: 1, k: 'clock' }, { x: 9, y: 1, k: 'calendar' },
+      { x: 2, y: 4, k: 'vase' }, { x: 3, y: 4, k: 'teaset' }, { x: 6, y: 2, k: 'trophy' },
+    ],
     npcs: [{ id: 'mom', x: 7, y: 5, dir: 'left', name: '妈妈', look: L(0, 1, 6, 2), action: 'home',
       lines: ['回来啦？先好好休息一下吧。', '（队伍全部恢复了健康）'] }],
   }),
   interior('town_house2', '小光家', 'town', [28, 9], {
-    w: 9, h: 8, floor: 'w',
+    w: 9, h: 8, floor: 'w', theme: 'kid',
     build: (g) => {
-      rect(g, 1, 2, 3, 1, 'h')
-      rect(g, 7, 2, 1, 2, 'b')
+      set(g, 1, 2, 'E'); rect(g, 2, 2, 2, 1, 'h')
+      set(g, 5, 2, 'A'); rect(g, 7, 2, 1, 2, 'b')
       set(g, 4, 4, 't'); set(g, 5, 4, 'c')
       rect(g, 2, 5, 4, 2, 'R')
-      set(g, 1, 6, 'P')
+      set(g, 1, 6, 'P'); set(g, 7, 6, 'Q')
     },
+    decor: [
+      { x: 1, y: 1, k: 'poster' }, { x: 3, y: 1, k: 'worldmap' }, { x: 6, y: 1, k: 'curtain' },
+      { x: 2, y: 2, k: 'trophy' }, { x: 3, y: 2, k: 'books' },
+    ],
     signs: { '4,4': '桌上有一张字条：“听说幽影森林的祭坛附近，有人见过会发光的蝴蝶！——小光”' },
   }),
   centerRoom('town_center', '新叶镇·精灵驿站', 'town', [7, 18], 'nurse_town'),
   shopRoom('town_shop', '友好商店', 'town', [28, 18], 'clerk_town'),
   centerRoom('village_center', '晨风村·精灵驿站', 'village', [23, 12], 'nurse_village'),
   interior('village_elder', '村长家', 'village', [29, 12], {
-    w: 10, h: 8, floor: 'w',
+    w: 10, h: 8, floor: 'w', theme: 'elder',
     build: (g) => {
-      rect(g, 1, 2, 4, 1, 'h'); rect(g, 6, 2, 2, 1, 'h')
+      rect(g, 1, 2, 3, 1, 'h'); set(g, 5, 2, 'G'); set(g, 7, 2, 'h')
+      set(g, 4, 2, 'L'); set(g, 8, 2, 'P')
       rect(g, 3, 4, 3, 1, 't')
       rect(g, 3, 5, 4, 2, 'R')
-      set(g, 8, 2, 'P'); set(g, 1, 6, 'P')
+      set(g, 1, 6, 'P'); rect(g, 8, 5, 1, 2, 'O')
     },
+    decor: [
+      { x: 2, y: 1, k: 'worldmap' }, { x: 5, y: 1, k: 'painting' }, { x: 7, y: 1, k: 'certificate' },
+      { x: 3, y: 4, k: 'teaset' }, { x: 5, y: 4, k: 'books' }, { x: 7, y: 2, k: 'trophy' },
+    ],
     npcs: [{ id: 'elder', x: 7, y: 4, dir: 'left', name: '村长 老松', look: L(1, 4, 5, 2, 0),
       lines: ['年轻人，这个世界没有中心服务器。', '大家的位置和聊天通过 Yjs 实时同步，存档则签名写在 Nostr 上——谁也删不掉你的冒险记录。'] }],
   }),
   interior('village_house', '民居', 'village', [6, 20], {
-    w: 9, h: 8, floor: 'w',
+    w: 9, h: 8, floor: 'w', theme: 'bakery',
     build: (g) => {
-      rect(g, 1, 2, 2, 1, 'h'); set(g, 3, 2, 'v')
+      rect(g, 1, 2, 3, 1, 'K'); set(g, 4, 2, 'F')
       rect(g, 7, 2, 1, 2, 'b')
-      set(g, 3, 4, 't'); set(g, 4, 4, 't')
+      set(g, 3, 4, 't'); set(g, 4, 4, 't'); set(g, 2, 4, 'c'); set(g, 5, 4, 'c')
       rect(g, 2, 5, 5, 2, 'R')
+      set(g, 7, 6, 'P')
     },
+    decor: [
+      { x: 2, y: 1, k: 'shelfWall' }, { x: 5, y: 1, k: 'curtain' }, { x: 6, y: 1, k: 'painting' },
+      { x: 3, y: 4, k: 'bread' }, { x: 4, y: 4, k: 'vase' },
+    ],
     npcs: [{ id: 'baker', x: 6, y: 4, dir: 'down', name: '面包奶奶', look: L(0, 4, 3, 4, 2, 3),
       lines: ['刚烤好的面包，要不要尝一块？', '出门在外，记得常回精灵驿站休息哦。'] }],
   }),
@@ -293,7 +339,7 @@ export const RARE_SPAWNS = [
   ['zappy', 30, 9, 13], ['frostcat', 24, 10, 14], ['lunamoth', 20, 12, 16], ['wispy', 16, 11, 15], ['thundrake', 6, 17, 21],
 ]
 
-const SOLID = new Set(['T', '~', '#', 'r', 'S', 'W', 'C', 'b', 't', 'c', 'h', 'D', 'P', 'M', 'v'])
+const SOLID = new Set(['T', '~', '#', 'r', 'S', 'W', 'C', 'b', 't', 'c', 'h', 'D', 'P', 'M', 'v', 'F', 'K', 'L', 'O', 'A', 'E', 'G', 'Q'])
 
 function finalize(m) {
   m.h = m.g.length

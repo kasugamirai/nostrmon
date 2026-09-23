@@ -9,9 +9,10 @@ import * as nostr from './nostr.js'
 import { YJS_PRESET, YJS_RELAY, WORLD_ROOM, NOSTR_RELAYS, PROFILE } from './config.js'
 import { $, say, toast, openModal, closeModal, confirmBox, monCard, paintCanvases, typeBadges } from './ui.js'
 import { monSprite, ballSprite, trainerSprite, SKIN, HAIR, SHIRT, PANTS, HATC } from './render/sprites.js'
+import { prerenderMap } from './render/tiles.js'
 import { escapeHtml, shortKey, timeAgo, sleep } from './util.js'
 
-const TABS = [['party', '队伍'], ['bag', '背包'], ['dex', '图鉴'], ['rank', '排行榜'], ['account', '训练家'], ['help', '玩法']]
+const TABS = [['map', '地图'], ['party', '队伍'], ['bag', '背包'], ['dex', '图鉴'], ['rank', '排行榜'], ['account', '训练家'], ['help', '玩法']]
 
 export function renderPartyBar(game) {
   const bar = $('party-bar')
@@ -35,10 +36,117 @@ export function openMenu(game, tab = 'party') {
   const show = (k) => {
     m.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === k))
     const body = m.querySelector('#tab-body')
-    ;({ party: renderParty, bag: renderBag, dex: renderDex, rank: renderRank, account: renderAccount, help: renderHelp })[k](game, body)
+    ;({ map: renderWorldMap, party: renderParty, bag: renderBag, dex: renderDex, rank: renderRank, account: renderAccount, help: renderHelp })[k](game, body)
   }
   m.querySelectorAll('[data-tab]').forEach((b) => (b.onclick = () => show(b.dataset.tab)))
   show(tab)
+}
+
+// —— 世界地图 / 传送 ——
+// 户外地图按出入口的连接关系自动拼成一整张；室内的位置用所在建筑的门来标注
+const TP_SPOTS = [
+  { map: 'town', x: 17, y: 12, label: '新叶镇' },
+  { map: 'route1', x: 9, y: 22, label: '1 号道路' },
+  { map: 'village', x: 16, y: 14, label: '晨风村' },
+  { map: 'forest', x: 12, y: 11, label: '幽影森林' },
+]
+const TP_QUICK = [
+  { map: 'town_center', label: '新叶镇·精灵驿站' },
+  { map: 'village_center', label: '晨风村·精灵驿站' },
+  { map: 'town_home', label: '你的家' },
+  { map: 'town_shop', label: '友好商店' },
+]
+const WPX = 6
+let worldLayout = null
+let worldCanvas = null
+
+function layoutWorld() {
+  if (worldLayout) return worldLayout
+  const pos = { town: [0, 0] }
+  const queue = ['town']
+  while (queue.length) {
+    const a = MAPS[queue.shift()]
+    for (const w of a.warps) {
+      const b = MAPS[w.to]
+      const back = b?.warps.find((v) => v.to === a.id)
+      if (!b || b.interior || pos[b.id] || !back) continue
+      let dx = w.x - back.x, dy = w.y - back.y
+      if (w.y === 0) dy -= 1
+      else if (w.y === a.h - 1) dy += 1
+      else if (w.x === 0) dx -= 1
+      else if (w.x === a.w - 1) dx += 1
+      pos[b.id] = [pos[a.id][0] + dx, pos[a.id][1] + dy]
+      queue.push(b.id)
+    }
+  }
+  const ids = Object.keys(pos)
+  const minX = Math.min(...ids.map((id) => pos[id][0])), minY = Math.min(...ids.map((id) => pos[id][1]))
+  const maxX = Math.max(...ids.map((id) => pos[id][0] + MAPS[id].w)), maxY = Math.max(...ids.map((id) => pos[id][1] + MAPS[id].h))
+  worldLayout = { pos, minX, minY, W: maxX - minX, H: maxY - minY }
+  return worldLayout
+}
+
+function worldMapCanvas() {
+  if (worldCanvas) return worldCanvas
+  const L = layoutWorld()
+  const cv = document.createElement('canvas')
+  cv.width = L.W * WPX
+  cv.height = L.H * WPX
+  cv.className = 'wmap-cv'
+  const ctx = cv.getContext('2d')
+  ctx.fillStyle = '#1d3524'
+  ctx.fillRect(0, 0, cv.width, cv.height)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  for (const [id, [ox, oy]] of Object.entries(L.pos)) {
+    const m = MAPS[id]
+    ctx.drawImage(prerenderMap(m)[0], (ox - L.minX) * WPX, (oy - L.minY) * WPX, m.w * WPX, m.h * WPX)
+    if (m.dark) { ctx.fillStyle = 'rgba(6,14,22,.35)'; ctx.fillRect((ox - L.minX) * WPX, (oy - L.minY) * WPX, m.w * WPX, m.h * WPX) }
+  }
+  worldCanvas = cv
+  return cv
+}
+
+// 室内 → 所在建筑门口在户外地图上的位置
+function locate(mapId, x, y) {
+  const L = layoutWorld()
+  if (L.pos[mapId]) return { map: mapId, x, y }
+  for (const id of Object.keys(L.pos)) {
+    const b = MAPS[id].buildings.find((b) => b.interior === mapId)
+    if (b) return { map: id, x: b.door[0], y: b.door[1], inside: MAPS[mapId].name }
+  }
+  return null
+}
+
+function renderWorldMap(game, el) {
+  const L = layoutWorld()
+  const pct = (loc) => {
+    const [ox, oy] = L.pos[loc.map]
+    return `left:${(((ox - L.minX + loc.x + 0.5) / L.W) * 100).toFixed(2)}%;top:${(((oy - L.minY + loc.y + 0.5) / L.H) * 100).toFixed(2)}%`
+  }
+  const here = locate(game.world.map.id, game.world.p.x, game.world.p.y)
+  const players = game.net.players().map((p) => ({ p, loc: locate(p.map, p.x, p.y) })).filter((o) => o.loc)
+  const spawns = Object.keys(L.pos).flatMap((id) => game.spawnsOn(id).map((s) => ({ s, loc: { map: id, x: s.x, y: s.y } })))
+  el.innerHTML = `
+    <p class="sub">点地名、其他训练家或 ✦ 稀有精灵，就能瞬间传送过去。现在位于 <b>${escapeHtml(game.world.map.name)}</b>。</p>
+    <div class="wmap">
+      ${TP_SPOTS.map((t, i) => `<button class="wpin spot" data-spot="${i}" style="${pct(t)}">${t.label}</button>`).join('')}
+      ${spawns.map(({ s, loc }, i) => `<button class="wpin spawn" data-spawn="${i}" style="${pct(loc)}" title="稀有的 ${SPECIES[s.sp].name} Lv.${s.lv}">✦</button>`).join('')}
+      ${players.map(({ p, loc }, i) => `<button class="wpin player" data-player="${i}" style="${pct(loc)}" title="${escapeHtml(p.name || '训练家')}${loc.inside ? ' · ' + escapeHtml(loc.inside) : ''}"><i></i><span>${escapeHtml(p.name || '训练家')}</span></button>`).join('')}
+      ${here ? `<span class="wpin me" style="${pct(here)}"><i></i><span>你</span></span>` : ''}
+    </div>
+    <div class="tp-quick">${TP_QUICK.map((q, i) => `<button class="btn small" data-quick="${i}">${q.label}</button>`).join('')}</div>`
+  el.querySelector('.wmap').prepend(worldMapCanvas())
+  el.querySelectorAll('[data-spot]').forEach((b) => (b.onclick = () => { const t = TP_SPOTS[+b.dataset.spot]; game.teleport(t.map, t.x, t.y, t.label) }))
+  el.querySelectorAll('[data-quick]').forEach((b) => (b.onclick = () => { const q = TP_QUICK[+b.dataset.quick]; const m = MAPS[q.map]; game.teleport(q.map, m.entry.x, m.entry.y, q.label) }))
+  el.querySelectorAll('[data-player]').forEach((b) => (b.onclick = () => {
+    const { p } = players[+b.dataset.player]
+    game.teleport(p.map, p.x, p.y, `${p.name || '训练家'} 身边`, { near: true })
+  }))
+  el.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => {
+    const { s } = spawns[+b.dataset.spawn]
+    game.teleport(s.map, s.x, s.y, `稀有的 ${SPECIES[s.sp].name} 附近`, { near: true })
+  }))
 }
 
 // —— 队伍 ——

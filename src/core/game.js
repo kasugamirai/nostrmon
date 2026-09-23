@@ -50,7 +50,7 @@ function defaultSave(pk) {
     look: lookFromKey(pk),
     party: [], box: [],
     bag: { ball: 5, potion: 3 },
-    coins: 500,
+    coins: 100000,
     dex: { seen: {}, caught: {} },
     beaten: {},
     stats: { caught: 0, pvpW: 0, pvpL: 0 },
@@ -71,6 +71,9 @@ function normalizeSave(s, pk) {
   out.box = (s?.box || []).filter((m) => SPECIES[m.sp])
   if (!MAPS[out.pos?.map]) out.pos = d.pos
   if (!MAPS[out.respawn?.map]) out.respawn = d.respawn
+  // 一次性补发：新规则下初始金币为 100000，老存档补足到这个数
+  out.grants = { ...(s?.grants || {}) }
+  if (!out.grants.coins100k) { out.coins = Math.max(out.coins || 0, 100000); out.grants.coins100k = true }
   return out
 }
 
@@ -220,6 +223,7 @@ game.captureKey = (e) => {
     return true
   }
   if (e.code === 'Escape' || e.code === 'KeyM' || e.code === 'KeyX') { openMenu(game); return true }
+  if (e.code === 'KeyN') { openMenu(game, 'map'); return true }
   return false
 }
 
@@ -233,6 +237,45 @@ game.leadInfo = () => {
 game.refreshPresence = () => {
   game.net.setPresence({ name: game.save.name, look: game.save.look, lead: game.leadInfo() })
   updateHud()
+}
+
+// —— 地图传送 ——
+// 从 (x, y) 向外找最近的空地（不是障碍、NPC 或出入口）；near=true 时不落在目标格本身（落在好友/精灵旁边）
+function freeTile(m, x, y, near) {
+  const blocked = (tx, ty) => m.solid[ty * m.w + tx] || m.npcs.some((n) => n.x === tx && n.y === ty) ||
+    m.warps.some((w) => tx >= w.x && tx < w.x + w.w && ty >= w.y && ty < w.y + w.h)
+  const seen = new Set([x + ',' + y])
+  const q = [[x, y, 0]]
+  while (q.length) {
+    const [cx, cy, d] = q.shift()
+    if (cx >= 0 && cy >= 0 && cx < m.w && cy < m.h && !(near && d === 0) && !blocked(cx, cy)) return { x: cx, y: cy }
+    if (d >= 8) continue
+    for (const [dx, dy] of [[0, 1], [1, 0], [-1, 0], [0, -1]]) {
+      const k = cx + dx + ',' + (cy + dy)
+      if (!seen.has(k)) { seen.add(k); q.push([cx + dx, cy + dy, d + 1]) }
+    }
+  }
+  return null
+}
+
+game.teleport = async (mapId, x, y, label, { near = false } = {}) => {
+  const m = MAPS[mapId]
+  if (!m || game.battleUI.open || game.lock) return
+  const spot = freeTile(m, x, y, near)
+  if (!spot) { toast('那里没有落脚的地方。'); return }
+  closeModal(true)
+  game.lock = true
+  game.world.held = []
+  let fx = $('tp-fx')
+  if (!fx) { fx = document.createElement('div'); fx.id = 'tp-fx'; $('app').appendChild(fx) }
+  fx.classList.add('on')
+  await sleep(380)
+  game.warp(mapId, spot.x, spot.y, 'down')
+  game.emote('✨')
+  await sleep(120)
+  fx.classList.remove('on')
+  game.lock = false
+  game.sys(`✨ 传送到了 ${label || m.name}`)
 }
 
 game.warp = (to, x, y, dir) => {
@@ -801,7 +844,8 @@ async function boot() {
 
   // 界面
   ;(OPTS.setupControls || setupTouch)(game)
-  $('menu-btn').onclick = () => !game.battleUI.open && openMenu(game)
+  $('menu-btn').onclick = () => !game.battleUI.open && openMenu(game, 'party')
+  if ($('map-btn')) $('map-btn').onclick = () => !game.battleUI.open && openMenu(game, 'map')
   $('me-chip').onclick = () => !game.battleUI.open && openMenu(game, 'account')
   $('online-btn').onclick = () => !game.battleUI.open && openOnline(game)
   $('coins').onclick = () => !game.battleUI.open && openMenu(game, 'bag')
@@ -814,7 +858,7 @@ async function boot() {
   game.ready = true
   banner(game.world.map.name)
   game.sys(`欢迎来到 Nostrmon！你的身份：${shortKey(signer.npub)}`)
-  game.sys(OPTS.helpLine || '方向键/WASD 移动 · Shift 奔跑 · 空格 互动 · Enter 聊天 · Esc 菜单')
+  game.sys(OPTS.helpLine || '方向键/WASD 移动 · Shift 奔跑 · 空格 互动 · Enter 聊天 · Esc 菜单 · N 地图传送')
 
   if (!game.save.party.length) {
     await openStarter(game)

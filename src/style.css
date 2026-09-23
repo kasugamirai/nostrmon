@@ -306,6 +306,24 @@ button.moncard:hover { background: var(--paper-2); }
   .b-info.me { bottom: 4%; }
 }
 
+/* —— 世界地图 / 传送 —— */
+.wmap { position: relative; width: 100%; max-width: 420px; margin: 8px auto 10px; border: 3px solid var(--ink); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 0 var(--ink); }
+.wmap-cv { display: block; width: 100%; height: auto; }
+.wpin { position: absolute; transform: translate(-50%, -50%); z-index: 1; }
+.wpin.spot { font-family: var(--display); font-size: 14px; background: var(--paper); border: 2px solid var(--ink); border-radius: 999px; padding: 1px 10px; box-shadow: 0 2px 0 var(--ink); white-space: nowrap; }
+.wpin.spot:hover { background: var(--gold); }
+.wpin.spawn { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--ink); background: var(--gold); font-size: 12px; line-height: 1; padding: 0; animation: wpulse 1.2s infinite; }
+.wpin.player, .wpin.me { display: flex; flex-direction: column; align-items: center; gap: 1px; background: none; border: 0; padding: 0; }
+.wpin.player i, .wpin.me i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; background: var(--sky); box-shadow: 0 0 0 2px var(--ink); }
+.wpin.me i { background: var(--coral); animation: wpulse 1s infinite; }
+.wpin.player span, .wpin.me span { font-size: 10px; font-weight: 700; color: #fff; background: rgba(28, 26, 46, .85); border-radius: 6px; padding: 0 4px; white-space: nowrap; }
+.wpin.player:hover i { background: var(--gold); }
+@keyframes wpulse { 50% { transform: scale(1.25); } }
+.tp-quick { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+#tp-fx { position: absolute; inset: 0; z-index: 45; pointer-events: none; opacity: 0; transition: opacity .35s ease;
+  background: radial-gradient(circle at 50% 55%, rgba(255,255,255,.98) 0, rgba(191,233,255,.9) 35%, rgba(142,92,247,.55) 70%, rgba(142,92,247,0) 100%); }
+#tp-fx.on { opacity: 1; }
+
 /* —— 加载 —— */
 #loading { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, #3f8f46, #1c3a24); }
 .load-card { background: var(--paper); border: 3px solid var(--ink); border-radius: 16px; box-shadow: 0 6px 0 var(--ink); padding: 22px 28px; width: min(420px, calc(100vw - 32px)); }

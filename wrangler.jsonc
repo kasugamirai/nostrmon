@@ -1,0 +1,11 @@
+// Cloudflare Workers 静态站点部署：构建命令 `npm run build` 生成 dist/，`npx wrangler deploy` 直接上传。
+// 有了这个文件，Wrangler 就不会再去自动改写 vite.config.js。
+// name 必须和 Cloudflare 控制台里这个 Worker 的名字一致。
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nostrmon",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./dist"
+  }
+}

@@ -1,19 +1,12 @@
 import { defineConfig } from 'vite'
-import { resolve } from 'node:path'
 
+// 两个页面：2D 像素版 index.html 和 3D 版 3d.html（路径相对项目根目录）
 export default defineConfig({
-  // Wrangler 的自动配置会把 @cloudflare/vite-plugin 写进这个数组。
-  plugins: [],
   base: './',
   server: { port: 5188, strictPort: true },
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
-    rollupOptions: {
-      input: {
-        main: resolve(import.meta.dirname, 'index.html'),
-        three: resolve(import.meta.dirname, '3d.html'),
-      },
-    },
+    rollupOptions: { input: { main: 'index.html', three: '3d.html' } },
   },
 })

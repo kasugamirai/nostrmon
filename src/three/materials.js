@@ -36,7 +36,7 @@ export function outlineMat(thickness = 0.03, color = OUTLINE_COLOR) {
     shader.uniforms.outlineThickness = { value: thickness }
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nuniform float outlineThickness;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(objectNormal) * outlineThickness;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += normalize(normal) * outlineThickness;')
   }
   m.customProgramCacheKey = () => 'outline' + key
   outlineCache.set(key, m)
